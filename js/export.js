@@ -81,7 +81,8 @@ export async function exportPDF(obra, sched) {
   const W = 297, H = 210, M = 10;
 
   const header = (title) => {
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.setTextColor(20);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.setTextColor(20, 48, 90);
+    doc.text('GEPLAN', W - M, M + 4, { align: 'right' });
     doc.text(title, M, M + 4);
     doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(90);
     doc.text(`${obra.nome}  •  Início ${fmtBR(sched.inicio)}  •  Término ${fmtBR(sched.termino)}  •  ${sched.durTotal} dias úteis  •  Emitido em ${fmtBR(todayDay())}`, M, M + 10);
@@ -95,7 +96,7 @@ export async function exportPDF(obra, sched) {
     head: [['Cód.', 'Etapa / Serviço', 'Unid.', 'Quant.', 'Horas', 'Equip.', 'Dur.', 'Início', 'Término', 'Pred.', 'Folga', '%']],
     body: rows.map((r) => [r.cells[0], r.cells[1], r.cells[3], r.cells[4] === '' ? '' : fmtNum(r.cells[4]), r.cells[6] === '' ? '' : fmtNum(r.cells[6], 1), r.etapa ? '' : r.cells[7], r.cells[8], r.cells[9], r.cells[10], r.cells[11], r.etapa ? '' : r.cells[12], r.cells[14] === '' ? '' : `${r.cells[14]}%`]),
     styles: { fontSize: 8, cellPadding: 1.5 },
-    headStyles: { fillColor: [42, 120, 214] },
+    headStyles: { fillColor: [20, 48, 90] },
     columnStyles: { 1: { cellWidth: 80 }, 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' }, 6: { halign: 'right' }, 10: { halign: 'right' }, 11: { halign: 'right' } },
     didParseCell: (d) => {
       if (d.section !== 'body') return;
@@ -138,10 +139,10 @@ export async function exportPDF(obra, sched) {
       const y = top + i * rowH;
       doc.setDrawColor(235); doc.line(M, y + rowH, W - M, y + rowH);
       if (ln.et) {
-        doc.setFillColor(240, 239, 236); doc.rect(M, y, W - 2 * M, rowH, 'F');
+        doc.setFillColor(246, 238, 231); doc.rect(M, y, W - 2 * M, rowH, 'F');
         doc.setFont('helvetica', 'bold'); doc.setTextColor(20); doc.setFontSize(8);
         doc.text(doc.splitTextToSize(`${ln.et.code}  ${ln.et.nome}`, labelW - 2)[0], M + 1, y + 4);
-        if (!ln.et.vazia) { doc.setFillColor(58, 57, 54); doc.rect(x(ln.et.inicio), y + 2, Math.max(0.6, x(ln.et.termino + 1) - x(ln.et.inicio)), 2, 'F'); }
+        if (!ln.et.vazia) { doc.setFillColor(184, 145, 122); doc.rect(x(ln.et.inicio), y + 2, Math.max(0.6, x(ln.et.termino + 1) - x(ln.et.inicio)), 2, 'F'); }
       } else {
         const r = ln.r;
         doc.setFont('helvetica', 'normal'); doc.setTextColor(r.critico ? 180 : 40, r.critico ? 40 : 40, r.critico ? 40 : 40); doc.setFontSize(7.5);
@@ -151,10 +152,10 @@ export async function exportPDF(obra, sched) {
           doc.triangle(cx, y + 1.2, cx + 1.8, y + 3, cx - 1.8, y + 3, 'F'); doc.triangle(cx, y + 4.8, cx + 1.8, y + 3, cx - 1.8, y + 3, 'F');
         } else {
           const bx = x(r.inicio), bw = Math.max(0.6, x(r.termino + 1) - bx);
-          if (r.critico) doc.setFillColor(208, 59, 59); else doc.setFillColor(42, 120, 214);
+          if (r.critico) doc.setFillColor(208, 59, 59); else doc.setFillColor(61, 90, 128);
           doc.roundedRect(bx, y + 1.3, bw, rowH - 2.6, 0.6, 0.6, 'F');
           const pct = Number(r.s.pct) || 0;
-          if (pct > 0) { if (r.critico) doc.setFillColor(130, 30, 30); else doc.setFillColor(24, 79, 149); doc.rect(bx, y + 1.3, (bw * pct) / 100, rowH - 2.6, 'F'); }
+          if (pct > 0) { if (r.critico) doc.setFillColor(130, 30, 30); else doc.setFillColor(20, 48, 90); doc.rect(bx, y + 1.3, (bw * pct) / 100, rowH - 2.6, 'F'); }
         }
       }
     });

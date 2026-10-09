@@ -1,9 +1,9 @@
 // Service worker: deixa o site abrir sem internet (os dados ficam no aparelho e sobem ao Drive depois).
-const CACHE = 'geplan-v1';
+const CACHE = 'geplan-v2';
 const SHELL = [
   './', './index.html', './css/styles.css', './manifest.webmanifest',
   './js/app.js', './js/store.js', './js/schedule.js', './js/drive.js', './js/export.js', './js/config.js',
-  './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png',
+  './icons/icon.svg', './icons/logo.svg', './icons/icon-192.png', './icons/icon-512.png',
 ];
 
 self.addEventListener('install', (e) => {
@@ -17,11 +17,8 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET') return;
-  // APIs do Google nunca passam pelo cache
-  if (url.hostname.endsWith('googleapis.com') || url.hostname === 'accounts.google.com') return;
-
-  // Bibliotecas de exportação (CDN): cache após o primeiro uso
-  if (url.hostname === 'cdnjs.cloudflare.com') {
+  // Fontes (Montserrat) e bibliotecas de exportação (CDN): cache após o primeiro uso
+  if (['cdnjs.cloudflare.com', 'fonts.googleapis.com', 'fonts.gstatic.com'].includes(url.hostname)) {
     e.respondWith(caches.match(e.request).then((hit) => hit || fetch(e.request).then((res) => {
       const copy = res.clone();
       caches.open(CACHE).then((c) => c.put(e.request, copy));
@@ -29,6 +26,9 @@ self.addEventListener('fetch', (e) => {
     })));
     return;
   }
+
+  // APIs do Google nunca passam pelo cache
+  if (url.hostname.endsWith('googleapis.com') || url.hostname === 'accounts.google.com') return;
 
   // Arquivos do site: rede primeiro (para pegar atualizações), cache se estiver offline
   if (url.origin === location.origin) {

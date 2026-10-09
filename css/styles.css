@@ -337,3 +337,26 @@ details.archived summary { cursor: pointer; padding: 10px 12px; color: var(--tex
 .dias label:has(input:checked) { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .dias input { display: none; }
 code.k { background: var(--surface-2); padding: 1px 6px; border-radius: 4px; font-size: 12px; }
+
+/* Tela de login */
+#gate { display: none; }
+body.locked .topbar, body.locked .shell, body.locked .bottomnav { display: none !important; }
+body.locked #gate {
+  display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 24px 16px;
+  background: radial-gradient(ellipse at top, #1d3f73 0%, var(--navy) 45%, var(--navy-2) 100%);
+}
+.gate-card { width: min(380px, 100%); text-align: center; color: #fff; display: flex; flex-direction: column; align-items: center; }
+.gate-card .logo-mark { width: 72px; height: 100px; margin-bottom: 18px; }
+.gate-name { font-size: 40px; font-weight: 700; letter-spacing: .03em; line-height: 1; }
+.gate-tag { font-size: 10.5px; font-weight: 500; letter-spacing: .24em; color: var(--sand); margin-top: 10px; }
+.gate-slogan { margin: 26px 0 30px; font-size: 13px; letter-spacing: .18em; text-transform: uppercase; color: var(--beige); }
+.gate-slogan::after { content: ""; display: block; width: 48px; height: 2px; background: var(--beige); margin: 14px auto 0; opacity: .7; }
+.gate-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 12px; width: 100%;
+  min-height: 48px; padding: 10px 18px; border-radius: 10px; border: none; cursor: pointer;
+  background: #fff; color: #2e2e2e; font-weight: 600; font-size: 15px; box-shadow: 0 6px 24px rgba(0,0,0,.25);
+}
+.gate-btn:hover { background: var(--sand); }
+.gate-btn:disabled { opacity: .7; cursor: wait; }
+.gate-error { margin-top: 16px; padding: 10px 14px; border-radius: 8px; background: rgba(208,59,59,.18); border: 1px solid rgba(208,59,59,.5); font-size: 13px; width: 100%; }
+.gate-note { margin-top: 22px; font-size: 12px; color: rgba(255,255,255,.55); }

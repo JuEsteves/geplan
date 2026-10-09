@@ -19,7 +19,7 @@ function readJSON(key, fallback) {
 const data = readJSON(DATA_KEY, { biblioteca: emptyLib(), obras: {} });
 if (!data.biblioteca) data.biblioteca = emptyLib();
 if (!data.obras) data.obras = {};
-export const meta = readJSON(META_KEY, { tombstones: [], files: {}, folderId: null, lastSync: 0 });
+export const meta = readJSON(META_KEY, { tombstones: [], files: {}, folderId: null, lastSync: 0, owner: null });
 
 const listeners = new Set();
 export const onChange = (fn) => listeners.add(fn);
@@ -113,6 +113,15 @@ export function importAll(json) {
   allDocs().forEach((doc) => { doc.updatedAt = now; });
   persist();
   listeners.forEach((fn) => fn(null));
+}
+
+/** Apaga os dados deste aparelho (usado ao sair ou ao trocar de conta). Os dados no Drive não são tocados. */
+export function clearLocal() {
+  data.biblioteca = emptyLib();
+  data.obras = {};
+  Object.assign(meta, { tombstones: [], files: {}, folderId: null, lastSync: 0, owner: null });
+  persist();
+  saveMeta();
 }
 
 export function hasPending() {

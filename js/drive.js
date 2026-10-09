@@ -62,21 +62,28 @@ async function requestToken(prompt) {
   });
 }
 
-/** Precisa ser chamado a partir de um clique (abre a janela do Google). */
-export async function connect() {
-  await requestToken(isConnected() ? '' : 'consent');
+/**
+ * Login com Google. Precisa ser chamado a partir de um clique (abre a janela do Google).
+ * Retorna a conta ({displayName, emailAddress}); NÃO sincroniza — quem chama decide se a conta é autorizada.
+ */
+export async function signIn() {
+  await requestToken('select_account');
+  const about = await api(`${API}/about?fields=user(displayName,emailAddress)`);
+  return about.user;
+}
+
+/** Marca a conta como conectada (depois de autorizada) e inicia a sincronização. */
+export async function activate(user) {
   localStorage.setItem(CONNECTED_KEY, '1');
-  try {
-    const about = await api(`${API}/about?fields=user(displayName,emailAddress)`);
-    status.user = about.user;
-    localStorage.setItem('planobras:driveUser', JSON.stringify(about.user));
-  } catch {}
+  status.user = user;
+  localStorage.setItem('planobras:driveUser', JSON.stringify(user));
   await sync();
 }
 
-export function disconnect() {
+/** Sai da conta neste aparelho (esquece o acesso). `revoke` também cancela a permissão dada ao app no Google. */
+export function disconnect({ revoke = false } = {}) {
   const t = getToken();
-  if (t && window.google?.accounts?.oauth2) google.accounts.oauth2.revoke(t, () => {});
+  if (revoke && t && window.google?.accounts?.oauth2) google.accounts.oauth2.revoke(t, () => {});
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(CONNECTED_KEY);
   localStorage.removeItem('planobras:driveUser');
@@ -237,7 +244,10 @@ export function scheduleSync() {
   timer = setTimeout(() => sync(), 2500);
 }
 
+let started = false;
 export function init() {
+  if (started) return;
+  started = true;
   status.user = savedUser();
   window.addEventListener('online', () => sync());
   window.addEventListener('offline', () => isConnected() && setStatus('offline', 'Sem internet: alterações salvas no aparelho'));

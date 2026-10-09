@@ -2,6 +2,18 @@ import * as store from './store.js';
 import * as S from './schedule.js';
 import * as drive from './drive.js';
 import { exportExcel, exportPDF } from './export.js';
+import { ALLOWED_EMAIL_HASHES } from './config.js';
+
+/* ---------- acesso (login com Google + lista de contas autorizadas) ---------- */
+let authorized = false;
+async function sha256(text) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+async function isAllowed(email) {
+  if (!email) return false;
+  return ALLOWED_EMAIL_HASHES.includes(await sha256(email.trim().toLowerCase()));
+}
 
 const $view = document.getElementById('view');
 const $sync = document.getElementById('sync');
@@ -46,10 +58,18 @@ function formDialog({ title, fields, ok = 'Salvar', text = '' }) {
   };
   dlg.innerHTML = `<form method="dialog"><h2>${esc(title)}</h2>${text ? `<p class="muted">${esc(text)}</p>` : ''}
     <div class="stack" style="margin-top:14px">${fields.map(field).join('')}</div>
-    <div class="actions"><button class="btn" value="cancel" formnovalidate>Cancelar</button><button class="btn primary" value="ok">${esc(ok)}</button></div></form>`;
-  dlg.returnValue = '';
+    <div class="actions"><button type="button" class="btn" value="cancel">Cancelar</button><button class="btn primary" value="ok">${esc(ok)}</button></div></form>`;
   return new Promise((resolve) => {
-    dlg.onclose = () => resolve(dlg.returnValue === 'ok' ? Object.fromEntries(new FormData(dlg.querySelector('form'))) : null);
+    let done = false;
+    const finish = (v) => { if (done) return; done = true; if (dlg.open) dlg.close(); resolve(v); };
+    const form = dlg.querySelector('form');
+    form.onsubmit = (e) => {
+      e.preventDefault();
+      finish(e.submitter?.value === 'ok' ? Object.fromEntries(new FormData(form)) : null);
+    };
+    dlg.querySelector('button[value="cancel"]').onclick = () => finish(null);
+    dlg.oncancel = () => finish(null);
+    dlg.onclose = () => finish(null);
     dlg.showModal();
     dlg.querySelector('input, select')?.focus();
   });
@@ -59,10 +79,14 @@ function formDialog({ title, fields, ok = 'Salvar', text = '' }) {
 function ask(message, ok = 'Confirmar') {
   const dlg = document.getElementById('dlg');
   dlg.innerHTML = `<form method="dialog"><h2>Confirmar</h2><p style="margin:12px 0 0">${esc(message)}</p>
-    <div class="actions"><button class="btn" value="cancel">Cancelar</button><button class="btn primary" value="ok">${esc(ok)}</button></div></form>`;
-  dlg.returnValue = '';
+    <div class="actions"><button type="button" class="btn" value="cancel">Cancelar</button><button type="button" class="btn primary" value="ok">${esc(ok)}</button></div></form>`;
   return new Promise((resolve) => {
-    dlg.onclose = () => resolve(dlg.returnValue === 'ok');
+    let done = false;
+    const finish = (v) => { if (done) return; done = true; if (dlg.open) dlg.close(); resolve(v); };
+    dlg.querySelector('button[value="ok"]').onclick = () => finish(true);
+    dlg.querySelector('button[value="cancel"]').onclick = () => finish(false);
+    dlg.oncancel = () => finish(false);
+    dlg.onclose = () => finish(false);
     dlg.showModal();
     dlg.querySelector('button[value="ok"]').focus();
   });
@@ -92,7 +116,51 @@ function parseRoute() {
   return { name: 'obras' };
 }
 
+const LOGO_MARK = (stroke = '#fff') => `<svg class="logo-mark" viewBox="0 0 300 420" aria-hidden="true"><g fill="none" stroke="${stroke}" stroke-width="26"><polyline points="20,420 20,226 125,164"/><polyline points="133,160 133,98 257,25 257,240"/></g><polygon fill="${stroke}" points="120,170 194,127 194,420 120,420"/><polygon fill="#d8b7a3" points="222,192 300,238 300,420 222,420"/></svg>`;
+
+function renderGate(error = '') {
+  document.body.classList.add('locked');
+  document.getElementById('gate').innerHTML = `<div class="gate-card">
+    ${LOGO_MARK()}
+    <div class="gate-name">GEPLAN</div>
+    <div class="gate-tag">GESTÃO E PLANEJAMENTO DE OBRAS</div>
+    <p class="gate-slogan">Da estratégia à execução</p>
+    <button class="gate-btn" id="gateLogin" type="button">
+      <svg viewBox="0 0 48 48" width="20" height="20" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.6 13.3l7.9 6.1C12.4 13.7 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.7 6c4.5-4.2 6.9-10.3 6.9-17.7z"/><path fill="#FBBC05" d="M10.5 28.6c-.5-1.4-.8-3-.8-4.6s.3-3.2.8-4.6l-7.9-6.1C1 16.6 0 20.2 0 24s1 7.4 2.6 10.7l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.7-6c-2.2 1.5-5 2.3-8.2 2.3-6.3 0-11.6-4.2-13.5-10l-7.9 6.1C6.6 42.6 14.6 48 24 48z"/></svg>
+      Entrar com Google
+    </button>
+    ${error ? `<div class="gate-error">${esc(error)}</div>` : ''}
+    <p class="gate-note">Acesso restrito a usuários autorizados.</p>
+  </div>`;
+  document.getElementById('gateLogin').onclick = login;
+}
+
+async function login() {
+  const btn = document.getElementById('gateLogin');
+  btn.disabled = true; btn.lastChild.textContent = ' Entrando…';
+  try {
+    const user = await drive.signIn();
+    if (!(await isAllowed(user.emailAddress))) {
+      drive.disconnect();
+      return renderGate(`A conta ${user.emailAddress} não tem acesso ao GEPLAN.`);
+    }
+    // Outra conta usou este aparelho antes: não misturar os dados
+    if (store.meta.owner && store.meta.owner !== user.emailAddress.toLowerCase()) store.clearLocal();
+    store.meta.owner = user.emailAddress.toLowerCase();
+    store.saveMeta();
+    authorized = true;
+    document.body.classList.remove('locked');
+    render();
+    drive.init();
+    await drive.activate(user);
+  } catch (e) {
+    renderGate(e.message || 'Não foi possível entrar.');
+  }
+}
+
 function render() {
+  if (!authorized) return renderGate();
+  document.body.classList.remove('locked');
   const route = parseRoute();
   // mantém o foco/cursor do campo que estava ativo
   const ae = document.activeElement;
@@ -626,13 +694,20 @@ function viewDrive() {
   return `<div class="page-head"><div><h1>Google Drive</h1><div class="muted">Armazenamento principal das suas obras</div></div></div>
   <div class="stack" style="max-width:820px">
     <div class="card card-pad stack">
-      <div class="row between"><h2>Conexão</h2><span class="badge ${connected ? (st.state === 'ok' ? 'good' : st.state === 'error' || st.state === 'auth' ? 'crit' : 'warn') : ''}">${connected ? esc(st.message || 'Conectado') : 'Não conectado'}</span></div>
-      ${connected ? `<div>${user ? `Conta: <b>${esc(user.displayName || '')}</b> ${esc(user.emailAddress || '')}<br>` : ''}Pasta no Drive: <b>Meu Drive › GEPLAN - Planejamento de Obras</b><br><span class="muted small">Última sincronização: ${last}</span></div>
-        <div class="row"><button class="btn primary" data-act="syncNow">Sincronizar agora</button><button class="btn danger" data-act="driveDisconnect">Desconectar</button></div>`
-      : `<p class="muted" style="margin:0">Ao conectar, o site cria a pasta <b>GEPLAN - Planejamento de Obras</b> no seu Drive e salva a biblioteca e cada obra como arquivos. Sem internet, tudo continua salvo no aparelho e é enviado quando a conexão voltar.</p>
-        <div><button class="btn primary" data-act="driveConnect" ${drive.clientId() ? '' : 'disabled'}>Conectar com o Google</button></div>
-        ${drive.clientId() ? '' : '<div class="alert err">Falta configurar o Client ID do Google (abaixo).</div>'}`}
+      <div class="row between"><h2>Conta e conexão</h2><span class="badge ${connected ? (st.state === 'ok' ? 'good' : st.state === 'error' || st.state === 'auth' ? 'crit' : 'warn') : ''}">${connected ? esc(st.message || 'Conectado') : 'Não conectado'}</span></div>
+      <div>${user ? `Conta: <b>${esc(user.displayName || '')}</b> ${esc(user.emailAddress || '')}<br>` : ''}Pasta no Drive: <b>Meu Drive › GEPLAN - Planejamento de Obras</b><br><span class="muted small">Última sincronização: ${last}</span></div>
+      <div class="row"><button class="btn primary" data-act="syncNow">Sincronizar agora</button><button class="btn danger" data-act="logout">Sair</button></div>
+      <div class="muted small">Ao sair, os dados deste aparelho são apagados (eles continuam no seu Google Drive). Use "Sair" em computadores ou celulares de outras pessoas.</div>
     </div>
+    <details class="card card-pad">
+      <summary style="cursor:pointer;font-weight:600">Autorizar outra pessoa</summary>
+      <div class="stack" style="margin-top:12px">
+        <p class="muted small" style="margin:0">1) Digite o e-mail Google da pessoa e gere o código. 2) Mande o código para quem mantém o site, para incluir em <code class="k">js/config.js</code>. 3) Adicione o mesmo e-mail em Google Cloud › Google Auth Platform › Público-alvo › <b>Usuários de teste</b>.</p>
+        <div class="row"><input id="accessEmail" type="email" placeholder="email@gmail.com" style="flex:1;min-width:200px" data-enter="genAccessCode"><button class="btn" data-act="genAccessCode">Gerar código de acesso</button></div>
+        <div id="accessCode"></div>
+        <p class="muted small" style="margin:0">Cada pessoa usa o próprio Google Drive: ela não vê as suas obras.</p>
+      </div>
+    </details>
     <details class="card card-pad" ${drive.clientId() ? '' : 'open'}>
       <summary style="cursor:pointer;font-weight:600">Configuração do Google (Client ID)</summary>
       <div class="stack" style="margin-top:12px">
@@ -872,9 +947,25 @@ const actions = {
     store.deleteObra(o.id);
     location.hash = '#/obras';
   },
-  async driveConnect() { try { await drive.connect(); toast('Conectado ao Google Drive.'); } catch (e) { toast(e.message, 5000); } render(); },
+  async logout() {
+    if (store.hasPending() && navigator.onLine) await drive.sync().catch(() => {});
+    const msg = store.hasPending()
+      ? 'Há alterações que ainda NÃO foram enviadas ao Google Drive e serão perdidas. Sair mesmo assim?'
+      : 'Sair do GEPLAN neste aparelho? Seus dados continuam salvos no Google Drive.';
+    if (!(await ask(msg, 'Sair'))) return;
+    drive.disconnect();
+    store.clearLocal();
+    authorized = false;
+    location.hash = '#/obras';
+    render();
+  },
+  async genAccessCode() {
+    const email = document.getElementById('accessEmail').value.trim().toLowerCase();
+    if (!/^\S+@\S+\.\S+$/.test(email)) return toast('Digite um e-mail válido.');
+    const code = await sha256(email);
+    document.getElementById('accessCode').innerHTML = `<div class="alert info small">Código de acesso de <b>${esc(email)}</b>:<br><code class="k" style="word-break:break-all;user-select:all">${code}</code></div>`;
+  },
   async syncNow() { await drive.sync({ interactive: true }).catch((e) => toast(e.message)); render(); },
-  async driveDisconnect() { if (!(await ask('Desconectar do Google Drive? Os dados continuam neste aparelho e no Drive.', 'Desconectar'))) return; drive.disconnect(); render(); },
   saveClientId() { drive.setClientId(document.getElementById('clientId').value); toast('Client ID salvo.'); render(); },
   backupExport() {
     const blob = new Blob([store.exportAll()], { type: 'application/json' });
@@ -1012,9 +1103,16 @@ drive.onStatus(() => { renderSync(); if (parseRoute().name === 'drive') queueRen
 window.addEventListener('planobras:remote-change', () => { queueRender(); toast('Dados atualizados a partir do Google Drive.'); });
 window.addEventListener('hashchange', () => { window.scrollTo(0, 0); render(); });
 
-render();
-renderSync();
-drive.init();
+// Início: entra direto se esta conta já fez login neste aparelho e está autorizada
+(async () => {
+  const u = drive.savedUser();
+  authorized = drive.isConnected() && (await isAllowed(u?.emailAddress));
+  if (!authorized && drive.isConnected()) { drive.disconnect(); store.clearLocal(); }
+  if (authorized && !store.meta.owner) { store.meta.owner = u.emailAddress.toLowerCase(); store.saveMeta(); }
+  render();
+  renderSync();
+  if (authorized) drive.init();
+})();
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('./sw.js').catch(() => {});

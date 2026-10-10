@@ -1,30 +1,44 @@
 # GEPLAN – Gestão e Planejamento de Obras
 
-Site (e app de celular) para montar o orçamento de quantitativos de uma obra e gerar o cronograma automaticamente
-a partir das **composições de tempo de execução** (horas por unidade).
+Site (e app de celular) que **estima o cronograma a partir do orçamento**, usando composições de serviço com
+coeficientes de produtividade (h/unid). Fluxo:
+
+`Composições → Orçamento → Vínculos Orçamento × EAP → Duração das atividades → Predecessoras (CPM) → Gantt / Curva S`
 
 ## Como funciona
 
-1. **Etapas** – biblioteca de etapas da construção (Fundação, Impermeabilização do baldrame, Alvenaria…). Etapas antigas podem ser arquivadas.
-2. **Composições** – cada serviço tem unidade e coeficiente em **h/unidade** para 1 equipe. Ex.: Alvenaria = 0,8 h/m².
-3. **Obra › Orçamento** – adicione as etapas e, dentro delas, os serviços com quantidade, nº de equipes e predecessoras.
-4. **Cronograma** – calculado sozinho:
-   `duração (dias úteis) = arredondar para cima( quantidade × coeficiente ÷ (equipes × jornada) )`
-   Ex.: 135 m² × 0,8 h/m² = 108 h ÷ (1 × 8 h) = 13,5 → **14 dias úteis**.
-5. **Gantt** com setas de dependência, caminho crítico, linha de base e dias não úteis.
-6. **Acompanhamento** – % executado por serviço, datas reais, medições e **Curva S** (planejado × real).
-7. **Exportação** para Excel e PDF.
+1. **Composições** – cada composição tem funções de mão de obra com coeficiente (h/unid); **exatamente uma é a função líder** (define o prazo). Têm fonte (Obra própria / SINAPI / TCPO) e versão.
+2. **Orçamento** – itens por etapa/subetapa, com composição, quantidade e custo unitário (total = quantidade × custo unitário).
+3. **Vínculos** – cada item é distribuído em % entre atividades da EAP (relação N:N). A soma deve dar 100% (senão aparece "Verificar").
+4. **Atividades (EAP nível 1/2/3)** – para cada vínculo: `qtd alocada = quantidade × %`, `HH = qtd alocada × coef. da função líder`, `custo alocado = total × %`.
+   `duração = ARRED.PARA.CIMA( HH ÷ (equipe × jornada × eficiência) )` — jornada 8,8 h e eficiência 0,85 por padrão (por obra).
+   Duração manual tem prioridade. Atividades sem vínculo e sem duração manual (cura, fornecedor, documentação…) usam a **duração padrão do tipo** com alerta, até você preencher.
+5. **Cronograma (CPM)** em dias úteis (feriados da obra + gerais), com folga total e caminho crítico. Prioridade do início: início real > início fixado > predecessoras; fim real substitui o fim calculado. Ciclos são bloqueados. Níveis 1 e 2 agregam as filhas.
+6. **Gantt**, **Curva S** física (ponderada por HH) e financeira (custo alocado distribuído nos dias úteis), **Acompanhamento** (% executado, datas reais, medições) e **exportação** Excel/PDF.
+7. **Importar planilha** – cria uma obra a partir do .xlsx modelo (abas EAP Detalhada, Composicoes, Orcamento, Vinculo_Orc_EAP e Duracao_Atividades).
 
-### Predecessoras
+### Predecessoras (mesma notação da planilha)
 | Digite | Significado |
 |---|---|
-| `1.2` | começa depois que o serviço 1.2 termina |
-| `3` | começa depois que **toda a etapa 3** termina |
-| `2.1+2` | começa 2 dias úteis após o término de 2.1 |
-| `2.1-3` | começa 3 dias úteis antes do término de 2.1 (sobreposição) |
-| `1.2; 2.1` | depende dos dois |
+| `3.2` | término→início: começa no dia útil seguinte ao fim da 3.2 |
+| `3.2 TI-10` | começa 10 dias úteis antes do fim da 3.2 (sobreposição) |
+| `3.2+2` | começa 2 dias úteis após o fim da 3.2 |
+| `3.1 II+5` | início→início: começa 5 dias úteis após o início da 3.1 |
+| `6.1/6.2/6.4 TI-5` | várias predecessoras, mesmo tipo e lag (vale a mais tardia) |
+| `1.2; 3.1 II` | grupos diferentes separados por `;` |
+| `-` ou vazio | sem predecessora (começa na data de início da obra) |
+| texto (ex. "Retomada") | vira observação; defina o **início fixado** da atividade |
 
-Ao criar um serviço, ele já vem ligado ao serviço anterior da mesma etapa (ou à etapa anterior). Basta editar.
+### Testes
+Abra `tests/index.html` pelo servidor local (`tools\serve.ps1`, ex. http://localhost:8080/tests/). Os testes usam os valores da
+planilha modelo (2.4.4 = 223,3 HH → 10 dias; 7.2.2 = 728 HH → 25 dias; aço 60/40 → 4 e 3 dias; custo alocado = R$ 224.306,00;
+datas com FS, TI negativo, SS com lag, várias predecessoras e feriado) e, se `docs/` tiver a planilha, testam também a importação.
+
+> A pasta `docs/` (planilhas das obras) e `tests/` **não** precisam ir para o GitHub: o repositório é público.
+
+### Fase 2 (preparada)
+Cada obra tem a coleção `rdo` (vazia) e as composições têm `versao`/`ativa`, para registrar quantidade executada e horas
+reais por função e gravar o coeficiente real (`horas ÷ quantidade`) como nova versão "Obra própria".
 
 ## Armazenamento
 
@@ -93,12 +107,22 @@ Abra o endereço no Chrome (Android) ou Safari (iPhone):
 ```
 index.html              página única do app
 css/styles.css          visual (claro/escuro, computador/celular)
-js/app.js               telas e interações
-js/schedule.js          cálculo do cronograma, calendário, caminho crítico, curva S
+js/app.js               login, rotas, Google Drive, eventos
+js/obra.js              telas da obra (Orçamento, Vínculos, Atividades, Gantt, Curva S, Acompanhamento, Configurações)
+js/biblioteca.js        telas Obras, Composições e Importar planilha
+js/model.js             modelo de dados (v2) e migração do formato antigo
+js/calculo.js           HH, duração, custo alocado e validações (regras da planilha)
+js/predecessoras.js     notação 3.2 / 3.2 TI-10 / 3.1 II+5 ↔ dependências
+js/cpm.js               calendário de dias úteis e cronograma CPM (folga, caminho crítico)
+js/curvaS.js            Curva S física e financeira, avanço planejado/real
+js/importador.js        leitura do .xlsx modelo
+js/schedule.js          datas e formatação pt-BR
 js/store.js             armazenamento no aparelho
 js/drive.js             login Google e sincronização com o Drive
 js/export.js            exportação Excel/PDF
-js/config.js            Client ID do Google
+js/ui.js, js/libs.js    componentes de tela e bibliotecas externas
+js/config.js            Client ID do Google e contas autorizadas
 sw.js, manifest.webmanifest, icons/   app instalável e offline
+tests/                  testes automáticos (abrir no navegador)
 tools/serve.ps1         servidor local para testes
 ```

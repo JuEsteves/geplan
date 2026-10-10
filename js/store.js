@@ -1,15 +1,13 @@
 // Armazenamento local (fonte offline). O Google Drive é sincronizado por drive.js.
-// Documentos: a biblioteca (etapas + composições) e uma obra por documento.
+// Documentos: a biblioteca (composições, feriados gerais, modelos de EAP) e uma obra por documento.
 // Cada documento tem `updatedAt`, usado para decidir quem vence na sincronização.
+
+import { uid, emptyLib, migrateLib, migrateObra, novaObra as criarObraVazia, renumerar } from './model.js';
+
+export { uid };
 
 const DATA_KEY = 'planobras:data:v1';
 const META_KEY = 'planobras:meta:v1';
-
-export const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-
-function emptyLib() {
-  return { id: 'biblioteca', kind: 'biblioteca', etapas: [], composicoes: [], updatedAt: 0 };
-}
 
 function readJSON(key, fallback) {
   try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }
@@ -17,8 +15,9 @@ function readJSON(key, fallback) {
 }
 
 const data = readJSON(DATA_KEY, { biblioteca: emptyLib(), obras: {} });
-if (!data.biblioteca) data.biblioteca = emptyLib();
-if (!data.obras) data.obras = {};
+data.biblioteca = migrateLib(data.biblioteca);
+data.obras ||= {};
+for (const id of Object.keys(data.obras)) data.obras[id] = migrateObra(data.obras[id], data.biblioteca);
 export const meta = readJSON(META_KEY, { tombstones: [], files: {}, folderId: null, lastSync: 0, owner: null });
 
 const listeners = new Set();
@@ -31,6 +30,7 @@ function persist() {
     alert('Não foi possível salvar no aparelho: ' + e.message);
   }
 }
+persist();
 export function saveMeta() {
   try { localStorage.setItem(META_KEY, JSON.stringify(meta)); } catch {}
 }
@@ -47,37 +47,29 @@ export function touch(doc, { silent = false } = {}) {
   if (!silent) listeners.forEach((fn) => fn(doc));
 }
 
-export function newObra({ nome, inicio }) {
-  const o = {
-    id: uid(), kind: 'obra', nome, inicio,
-    calendario: { jornada: 8, dias: [1, 2, 3, 4, 5], feriados: [] },
-    etapas: [], linhaBase: null, medicoes: [], dataStatus: null, updatedAt: 0,
-  };
+export function addObra(o) {
   data.obras[o.id] = o;
   touch(o);
   return o;
 }
 
-export function duplicateObra(src) {
-  const map = new Map();
+export function newObra({ nome, inicio }) {
+  return addObra(criarObraVazia({ nome, inicio }));
+}
+
+/** Cópia da obra com novos ids (mantém orçamento, EAP, vínculos e dependências; zera o realizado). */
+export function duplicateObra(src, nome = src.nome + ' (cópia)') {
   const copy = JSON.parse(JSON.stringify(src));
-  copy.id = uid();
-  copy.nome = src.nome + ' (cópia)';
-  copy.linhaBase = null;
-  copy.medicoes = [];
-  for (const e of copy.etapas) {
-    const ne = uid(); map.set(e.id, ne); e.id = ne;
-    for (const s of e.servicos) {
-      const ns = uid(); map.set(s.id, ns); s.id = ns;
-      s.pct = 0; s.inicioReal = ''; s.fimReal = '';
-    }
-  }
-  for (const e of copy.etapas) for (const s of e.servicos) {
-    s.preds = (s.preds || []).map((p) => ({ ...p, ref: map.get(p.ref) || p.ref }));
-  }
-  data.obras[copy.id] = copy;
-  touch(copy);
-  return copy;
+  const map = new Map();
+  const novo = (old) => { const n = uid(); map.set(old, n); return n; };
+  copy.id = uid(); copy.nome = nome; copy.linhaBase = null; copy.medicoes = []; copy.rdo = [];
+  copy.eap.forEach((a) => { a.id = novo(a.id); a.pct = 0; a.inicioReal = ''; a.fimReal = ''; a.status = ''; });
+  copy.eap.forEach((a) => { a.parentId = a.parentId ? map.get(a.parentId) : null; });
+  copy.orcamento.forEach((it) => { it.id = novo(it.id); });
+  copy.vinculos = copy.vinculos.map((v) => ({ ...v, id: uid(), itemId: map.get(v.itemId), atividadeId: map.get(v.atividadeId) })).filter((v) => v.itemId && v.atividadeId);
+  copy.dependencias = copy.dependencias.map((d) => ({ ...d, id: uid(), atividadeId: map.get(d.atividadeId), predecessoraId: map.get(d.predecessoraId) })).filter((d) => d.atividadeId && d.predecessoraId);
+  renumerar(copy);
+  return addObra(copy);
 }
 
 export function deleteObra(id) {
@@ -90,10 +82,12 @@ export function deleteObra(id) {
   listeners.forEach((fn) => fn(null));
 }
 
-/** Usado pela sincronização: substitui sem alterar updatedAt. */
+/** Usado pela sincronização: substitui sem alterar updatedAt (migrando formatos antigos). */
 export function putDoc(doc) {
-  if (doc.kind === 'biblioteca') data.biblioteca = doc;
-  else data.obras[doc.id] = doc;
+  if (doc.kind === 'biblioteca') {
+    data.biblioteca = migrateLib(doc);
+    for (const id of Object.keys(data.obras)) data.obras[id] = migrateObra(data.obras[id], data.biblioteca);
+  } else data.obras[doc.id] = migrateObra(doc, data.biblioteca);
   persist();
 }
 export function removeLocal(id) {
@@ -102,13 +96,14 @@ export function removeLocal(id) {
 }
 
 export function exportAll() {
-  return JSON.stringify({ app: 'planejamento-de-obras', version: 1, exportedAt: new Date().toISOString(), ...data }, null, 2);
+  return JSON.stringify({ app: 'planejamento-de-obras', version: 2, exportedAt: new Date().toISOString(), ...data }, null, 2);
 }
 export function importAll(json) {
   const d = JSON.parse(json);
   if (!d.biblioteca || !d.obras) throw new Error('Arquivo inválido');
-  data.biblioteca = d.biblioteca;
-  data.obras = d.obras;
+  data.biblioteca = migrateLib(d.biblioteca);
+  data.obras = {};
+  for (const [id, o] of Object.entries(d.obras)) data.obras[id] = migrateObra(o, data.biblioteca);
   const now = Date.now();
   allDocs().forEach((doc) => { doc.updatedAt = now; });
   persist();

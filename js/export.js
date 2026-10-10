@@ -1,170 +1,141 @@
 // Exportação para Excel (SheetJS) e PDF (jsPDF). As bibliotecas são carregadas só quando usadas.
-import { fmtBR, fmtNum, formatPreds, todayDay } from './schedule.js';
-
-const LIBS = {
-  xlsx: 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',
-  jspdf: 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
-  autotable: 'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js',
-};
-
-const loaded = {};
-function loadScript(src) {
-  if (!loaded[src]) {
-    loaded[src] = new Promise((res, rej) => {
-      const s = document.createElement('script');
-      s.src = src; s.onload = res;
-      s.onerror = () => { delete loaded[src]; rej(new Error('Não foi possível carregar a biblioteca de exportação (verifique a internet).')); };
-      document.head.appendChild(s);
-    });
-  }
-  return loaded[src];
-}
+import { LIBS, loadScript } from './libs.js';
+import { fmtBR, fmtNum, todayDay, dateParts, MESES } from './schedule.js';
+import { curvaS } from './curvaS.js';
+import { liderDe } from './calculo.js';
 
 const safeName = (s) => s.replace(/[\\/:*?"<>|]/g, '-');
+const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
-function cronogramaRows(sched) {
-  const out = [];
-  for (const et of sched.etapas) {
-    out.push({ etapa: true, cells: [et.code, et.nome, '', '', '', '', et.horas || '', '', et.vazia ? '' : et.dur, et.vazia ? '' : fmtBR(et.inicio), et.vazia ? '' : fmtBR(et.termino), '', '', et.critico ? 'Sim' : '', et.vazia ? '' : Math.round(et.pct)] });
-    for (const r of et.rows) {
-      out.push({ etapa: false, critico: r.critico, cells: [
-        r.code, r.nome, r.comp?.nome || '', r.unidade, r.qtd || '', r.coef || '', Math.round(r.horas * 100) / 100 || '', r.equipes,
-        r.dur, fmtBR(r.inicio), fmtBR(r.termino), formatPreds(r.s.preds, sched.codes), r.folga, r.critico ? 'Sim' : '', Number(r.s.pct) || 0,
-      ] });
-    }
-  }
-  return out;
+function linhasAtividades(c) {
+  return c.o.eap.map((a) => {
+    const A = c.calc.ativ.get(a.id), n = c.cron.nos.get(a.id);
+    return {
+      a, folha: A.folha, critico: n.critico,
+      cells: [a.codigo, a.nivel, a.descricao, A.folha ? a.tipo : '', A.funcaoLider || '', r2(A.hh) || '', A.folha ? (a.equipe ?? '') : '',
+        A.folha ? (A.durCalc ?? '') : '', A.folha ? (a.duracaoManual ?? '') : '', n.dur, A.provisoria ? 'provisória' : '',
+        fmtBR(n.inicio), fmtBR(n.termino), A.folha ? c.predsTexto(a) : '', n.folga, n.critico && A.folha ? 'Sim' : '', r2(A.custo) || '', A.folha ? Number(a.pct) || 0 : '',
+        A.alertas.join(' | ')],
+    };
+  });
 }
+const HEAD_ATIV = ['Código', 'Nível', 'Atividade', 'Tipo', 'Função líder', 'HH', 'Equipe', 'Duração calc.', 'Duração manual', 'Duração adotada', 'Obs. duração', 'Início', 'Término', 'Predecessoras', 'Folga', 'Crítica', 'Custo alocado (R$)', '% executado', 'Alertas'];
 
-const HEAD = ['Código', 'Etapa / Serviço', 'Composição', 'Unid.', 'Quantidade', 'Coef. (h/un)', 'Horas', 'Equipes', 'Duração (dias úteis)', 'Início', 'Término', 'Predecessoras', 'Folga (dias)', 'Crítico', '% Executado'];
-
-export async function exportExcel(obra, sched, lib) {
+export async function exportExcel(o, c) {
   await loadScript(LIBS.xlsx);
   const X = window.XLSX;
   const wb = X.utils.book_new();
+  const cab = [[`Cronograma — ${o.nome}`], [`Início ${fmtBR(c.cron.inicio)} · Término ${fmtBR(c.cron.termino)} · ${c.cron.durTotal} dias úteis · Jornada ${fmtNum(c.calc.jornada)} h · Eficiência ${fmtNum(c.calc.eficiencia)}`], []];
 
-  const info = [
-    [`Cronograma — ${obra.nome}`],
-    [`Início: ${fmtBR(sched.inicio)}   Término: ${fmtBR(sched.termino)}   Duração: ${sched.durTotal} dias úteis   Jornada: ${sched.jornada} h/dia`],
-    [],
-    HEAD,
-    ...cronogramaRows(sched).map((r) => r.cells),
-  ];
-  const ws = X.utils.aoa_to_sheet(info);
-  ws['!cols'] = [8, 40, 30, 7, 11, 11, 10, 8, 10, 12, 12, 16, 10, 8, 11].map((w) => ({ wch: w }));
-  X.utils.book_append_sheet(wb, ws, 'Cronograma');
+  const ws = X.utils.aoa_to_sheet([...cab, HEAD_ATIV, ...linhasAtividades(c).map((r) => r.cells)]);
+  ws['!cols'] = [10, 6, 50, 18, 16, 9, 8, 10, 10, 10, 11, 11, 11, 18, 7, 7, 14, 10, 40].map((w) => ({ wch: w }));
+  X.utils.book_append_sheet(wb, ws, 'Atividades');
 
-  const comps = [['Composição', 'Unidade', 'Coeficiente (h/un)', 'Produção por equipe (un/dia)', 'Observação'],
-    ...lib.composicoes.map((c) => [c.nome, c.unidade, Number(c.coef) || 0, c.coef > 0 ? Math.round((sched.jornada / c.coef) * 100) / 100 : '', c.obs || ''])];
-  const wc = X.utils.aoa_to_sheet(comps);
-  wc['!cols'] = [{ wch: 40 }, { wch: 8 }, { wch: 16 }, { wch: 24 }, { wch: 40 }];
-  X.utils.book_append_sheet(wb, wc, 'Composições');
+  const orc = [['Item', 'Etapa', 'Subetapa', 'Cód. composição', 'Descrição', 'Unid.', 'Quantidade', 'Custo unit. (R$)', 'Total (R$)', '% vinculado', 'Verificação'],
+    ...o.orcamento.map((it) => { const I = c.calc.itens.get(it.id); return [it.codigo, it.etapa, it.subetapa, I.comp?.codigo || '', I.comp?.descricao || '', I.comp?.unidade || '', it.quantidade, it.custoUnit, r2(I.total), r2(I.pctSoma * 100) / 100, I.status]; }),
+    ['', '', '', '', '', '', '', 'Total', r2(c.calc.totalOrcamento)]];
+  X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(orc), 'Orcamento');
 
-  const dn = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
-  const calRows = [['Jornada (h/dia)', sched.jornada], ['Dias úteis', (obra.calendario.dias || []).map((d) => dn[d]).join(', ')], [], ['Feriado', 'Descrição'],
-    ...(obra.calendario.feriados || []).map((f) => [f.data.split('-').reverse().join('/'), f.desc || ''])];
-  X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(calRows), 'Calendário');
+  const vin = [['Item Orç.', 'ID Atividade (EAP)', '% da quantidade', 'Qtd alocada', 'Unid.', 'Função líder', 'Coef. líder (h/unid)', 'HH', 'Custo alocado (R$)'],
+    ...c.calc.vinculos.map((r) => [r.item.codigo, r.atividade.codigo, r.pct, r2(r.qtd), r.unidade, r.funcao, r.coef, r2(r.hh), r2(r.custo)])];
+  X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(vin), 'Vinculo_Orc_EAP');
 
-  if (obra.medicoes?.length) {
-    const med = [['Data', '% Executado (real)', '% Planejado'], ...obra.medicoes.map((m) => [m.data.split('-').reverse().join('/'), Math.round(m.real * 10) / 10, Math.round(m.plan * 10) / 10])];
-    X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(med), 'Medições');
+  const usadas = new Set(o.orcamento.map((it) => it.composicaoId));
+  const comp = [['Cód. Composição', 'Descrição', 'Unid.', 'Função', 'Coef. (h/unid)', 'Função líder? (S/N)', 'Fonte', 'Versão']];
+  for (const cp of c.lib.composicoes.filter((x) => usadas.has(x.id))) for (const m of cp.maoObra) comp.push([cp.codigo, cp.descricao, cp.unidade, m.funcao, m.coef, m.lider ? 'S' : 'N', cp.fonte, cp.versao]);
+  X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(comp), 'Composicoes');
+
+  const cs = curvaS(c.calc, c.cron, 'mes');
+  const curva = [['Mês', 'Físico no período (%)', 'Físico acumulado (%)', 'Financeiro no período (R$)', 'Financeiro acumulado (R$)'],
+    ...cs.periodos.map((p) => [p.label, r2(p.fisPer), r2(p.fisAc), r2(p.finPer), r2(p.finAc)])];
+  X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(curva), 'Curva S');
+
+  if (o.medicoes?.length) {
+    X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet([['Data', 'Físico plan. (%)', 'Físico real (%)', 'Financeiro plan. (R$)', 'Financeiro real (R$)'],
+      ...o.medicoes.map((m) => [m.data.split('-').reverse().join('/'), r2(m.fisicoPlan), r2(m.fisico), m.financeiroPlan == null ? '' : r2(m.financeiroPlan), m.financeiro == null ? '' : r2(m.financeiro)])]), 'Medições');
   }
-
-  X.writeFile(wb, `Cronograma - ${safeName(obra.nome)}.xlsx`);
+  X.writeFile(wb, `Cronograma - ${safeName(o.nome)}.xlsx`);
 }
 
-export async function exportPDF(obra, sched) {
+/** PDF: tabela de atividades + Gantt (linhas visíveis na tela). */
+export async function exportPDF(o, c, linhas) {
   await loadScript(LIBS.jspdf);
   await loadScript(LIBS.autotable);
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const W = 297, H = 210, M = 10;
-
   const header = (title) => {
     doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.setTextColor(20, 48, 90);
     doc.text('GEPLAN', W - M, M + 4, { align: 'right' });
     doc.text(title, M, M + 4);
     doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(90);
-    doc.text(`${obra.nome}  •  Início ${fmtBR(sched.inicio)}  •  Término ${fmtBR(sched.termino)}  •  ${sched.durTotal} dias úteis  •  Emitido em ${fmtBR(todayDay())}`, M, M + 10);
+    doc.text(`${o.nome}  •  Início ${fmtBR(c.cron.inicio)}  •  Término ${fmtBR(c.cron.termino)}  •  ${c.cron.durTotal} dias úteis  •  Emitido em ${fmtBR(todayDay())}`, M, M + 10);
   };
+  const rows = linhas.length ? linhas : c.o.eap;
 
-  // 1) Tabela
   header('Cronograma de execução');
-  const rows = cronogramaRows(sched);
   doc.autoTable({
     startY: M + 14,
-    head: [['Cód.', 'Etapa / Serviço', 'Unid.', 'Quant.', 'Horas', 'Equip.', 'Dur.', 'Início', 'Término', 'Pred.', 'Folga', '%']],
-    body: rows.map((r) => [r.cells[0], r.cells[1], r.cells[3], r.cells[4] === '' ? '' : fmtNum(r.cells[4]), r.cells[6] === '' ? '' : fmtNum(r.cells[6], 1), r.etapa ? '' : r.cells[7], r.cells[8], r.cells[9], r.cells[10], r.cells[11], r.etapa ? '' : r.cells[12], r.cells[14] === '' ? '' : `${r.cells[14]}%`]),
-    styles: { fontSize: 8, cellPadding: 1.5 },
+    head: [['Cód.', 'Atividade', 'Tipo', 'HH', 'Equipe', 'Dur.', 'Início', 'Término', 'Predec.', 'Folga', 'Custo (R$)']],
+    body: rows.map((a) => {
+      const A = c.calc.ativ.get(a.id), n = c.cron.nos.get(a.id);
+      return [a.codigo, `${'  '.repeat(a.nivel - 1)}${a.descricao}`, A.folha ? a.tipo : '', A.hh ? fmtNum(A.hh, 1) : '', A.folha ? (a.equipe ?? '') : '',
+        `${n.dur}${A.provisoria ? '*' : ''}`, fmtBR(n.inicio), fmtBR(n.termino), A.folha ? c.predsTexto(a) : '', n.folga, A.custo ? fmtNum(A.custo, 2) : ''];
+    }),
+    styles: { fontSize: 7.5, cellPadding: 1.2 },
     headStyles: { fillColor: [20, 48, 90] },
-    columnStyles: { 1: { cellWidth: 80 }, 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' }, 6: { halign: 'right' }, 10: { halign: 'right' }, 11: { halign: 'right' } },
+    columnStyles: { 1: { cellWidth: 82 }, 3: { halign: 'right' }, 5: { halign: 'right' }, 9: { halign: 'right' }, 10: { halign: 'right' } },
     didParseCell: (d) => {
       if (d.section !== 'body') return;
-      const r = rows[d.row.index];
-      if (r.etapa) { d.cell.styles.fontStyle = 'bold'; d.cell.styles.fillColor = [236, 235, 230]; }
-      else if (r.critico && d.column.index === 1) d.cell.styles.textColor = [208, 59, 59];
+      const a = rows[d.row.index];
+      if (!c.calc.ativ.get(a.id).folha) { d.cell.styles.fontStyle = 'bold'; d.cell.styles.fillColor = a.nivel === 1 ? [236, 228, 220] : [246, 238, 231]; }
+      else if (c.cron.nos.get(a.id).critico && d.column.index === 1) d.cell.styles.textColor = [208, 59, 59];
     },
     margin: { left: M, right: M },
   });
+  doc.setFontSize(7); doc.setTextColor(110);
+  doc.text('* duração provisória (padrão do tipo de atividade). Atividades em vermelho estão no caminho crítico.', M, H - 6);
 
-  // 2) Gantt
-  if (!sched.rows.length) { doc.save(`Cronograma - ${safeName(obra.nome)}.pdf`); return; }
-  const labelW = 70, chartX = M + labelW, chartW = W - M - chartX, rowH = 6, top = M + 26;
-  const d0 = sched.inicio, d1 = sched.termino + 1;
-  const span = Math.max(1, d1 - d0);
+  // Gantt
+  const labelW = 72, chartX = M + labelW, chartW = W - M - chartX, rowH = 5.4, top = M + 26;
+  const d0 = c.cron.inicio, d1 = c.cron.termino + 1, span = Math.max(1, d1 - d0);
   const x = (d) => chartX + ((d - d0) / span) * chartW;
-  const lines = [];
-  for (const et of sched.etapas) { lines.push({ et }); et.rows.forEach((r) => lines.push({ r })); }
   const perPage = Math.floor((H - top - M - 6) / rowH);
-  const months = [];
-  { const dt = new Date(d0 * 86400000); dt.setUTCDate(1); while (dt.getTime() / 86400000 < d1) { months.push(Math.floor(dt.getTime() / 86400000)); dt.setUTCMonth(dt.getUTCMonth() + 1); } }
-  const mn = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+  const meses = [];
+  { const dt = new Date(d0 * 86400000); dt.setUTCDate(1); while (dt.getTime() / 86400000 < d1) { meses.push(Math.floor(dt.getTime() / 86400000)); dt.setUTCMonth(dt.getUTCMonth() + 1); } }
   const today = todayDay();
-
-  for (let p = 0; p < lines.length; p += perPage) {
-    doc.addPage();
-    header('Gráfico de Gantt');
-    const pageLines = lines.slice(p, p + perPage);
-    const bottom = top + pageLines.length * rowH;
-    doc.setDrawColor(220); doc.setLineWidth(0.1);
-    doc.setFontSize(7); doc.setTextColor(110);
-    for (const m of months) {
-      const mx = Math.max(chartX, x(m));
-      doc.line(mx, top - 6, mx, bottom);
-      const dt = new Date(Math.max(m, d0) * 86400000);
-      if (x(Math.max(m, d0)) < W - M - 6) doc.text(`${mn[dt.getUTCMonth()]}/${String(dt.getUTCFullYear()).slice(2)}`, mx + 1, top - 2);
+  for (let p = 0; p < rows.length; p += perPage) {
+    doc.addPage(); header('Gráfico de Gantt');
+    const page = rows.slice(p, p + perPage), bottom = top + page.length * rowH;
+    doc.setDrawColor(220); doc.setLineWidth(0.1); doc.setFontSize(7); doc.setTextColor(110);
+    for (const m of meses) {
+      const mx = Math.max(chartX, x(m)); doc.line(mx, top - 6, mx, bottom);
+      const pr = dateParts(Math.max(m, d0));
+      if (mx < W - M - 6) doc.text(`${MESES[pr.m]}/${String(pr.y).slice(2)}`, mx + 1, top - 2);
     }
-    doc.line(chartX, top, W - M, top);
-    pageLines.forEach((ln, i) => {
-      const y = top + i * rowH;
+    page.forEach((a, i) => {
+      const y = top + i * rowH, A = c.calc.ativ.get(a.id), n = c.cron.nos.get(a.id);
       doc.setDrawColor(235); doc.line(M, y + rowH, W - M, y + rowH);
-      if (ln.et) {
-        doc.setFillColor(246, 238, 231); doc.rect(M, y, W - 2 * M, rowH, 'F');
-        doc.setFont('helvetica', 'bold'); doc.setTextColor(20); doc.setFontSize(8);
-        doc.text(doc.splitTextToSize(`${ln.et.code}  ${ln.et.nome}`, labelW - 2)[0], M + 1, y + 4);
-        if (!ln.et.vazia) { doc.setFillColor(184, 145, 122); doc.rect(x(ln.et.inicio), y + 2, Math.max(0.6, x(ln.et.termino + 1) - x(ln.et.inicio)), 2, 'F'); }
-      } else {
-        const r = ln.r;
-        doc.setFont('helvetica', 'normal'); doc.setTextColor(r.critico ? 180 : 40, r.critico ? 40 : 40, r.critico ? 40 : 40); doc.setFontSize(7.5);
-        doc.text(doc.splitTextToSize(`${r.code}  ${r.nome}`, labelW - 2)[0], M + 3, y + 4);
-        if (r.dur === 0) {
-          const cx = x(r.inicio); doc.setFillColor(58, 57, 54);
-          doc.triangle(cx, y + 1.2, cx + 1.8, y + 3, cx - 1.8, y + 3, 'F'); doc.triangle(cx, y + 4.8, cx + 1.8, y + 3, cx - 1.8, y + 3, 'F');
-        } else {
-          const bx = x(r.inicio), bw = Math.max(0.6, x(r.termino + 1) - bx);
-          if (r.critico) doc.setFillColor(208, 59, 59); else doc.setFillColor(61, 90, 128);
-          doc.roundedRect(bx, y + 1.3, bw, rowH - 2.6, 0.6, 0.6, 'F');
-          const pct = Number(r.s.pct) || 0;
-          if (pct > 0) { if (r.critico) doc.setFillColor(130, 30, 30); else doc.setFillColor(20, 48, 90); doc.rect(bx, y + 1.3, (bw * pct) / 100, rowH - 2.6, 'F'); }
-        }
+      if (!A.folha) {
+        doc.setFillColor(...(a.nivel === 1 ? [236, 228, 220] : [246, 238, 231])); doc.rect(M, y, W - 2 * M, rowH, 'F');
+        doc.setFont('helvetica', 'bold'); doc.setTextColor(20); doc.setFontSize(7);
+        doc.text(doc.splitTextToSize(`${a.codigo}  ${a.descricao}`, labelW - 2)[0], M + 1 + (a.nivel - 1) * 2, y + 3.7);
+        doc.setFillColor(184, 145, 122); doc.rect(x(n.inicio), y + 1.8, Math.max(0.6, x(n.termino + 1) - x(n.inicio)), 1.8, 'F');
+        return;
       }
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(6.8);
+      if (n.critico) doc.setTextColor(180, 40, 40); else doc.setTextColor(40);
+      doc.text(doc.splitTextToSize(`${a.codigo}  ${a.descricao}`, labelW - 4)[0], M + 1 + (a.nivel - 1) * 2, y + 3.7);
+      if (n.dur === 0) { const cx = x(n.inicio); doc.setFillColor(58, 57, 54); doc.triangle(cx, y + 0.9, cx + 1.6, y + 2.7, cx - 1.6, y + 2.7, 'F'); doc.triangle(cx, y + 4.5, cx + 1.6, y + 2.7, cx - 1.6, y + 2.7, 'F'); return; }
+      const bx = x(n.inicio), bw = Math.max(0.6, x(n.termino + 1) - bx);
+      if (n.critico) doc.setFillColor(208, 59, 59); else if (A.provisoria) doc.setFillColor(160, 178, 200); else doc.setFillColor(61, 90, 128);
+      doc.roundedRect(bx, y + 1.1, bw, rowH - 2.2, 0.5, 0.5, 'F');
+      const pct = Number(a.pct) || 0;
+      if (pct > 0) { doc.setFillColor(...(n.critico ? [130, 30, 30] : [20, 48, 90])); doc.rect(bx, y + 1.1, (bw * Math.min(100, pct)) / 100, rowH - 2.2, 'F'); }
     });
-    if (today >= d0 && today <= d1) {
-      doc.setDrawColor(208, 59, 59); doc.setLineWidth(0.4); doc.setLineDashPattern([1, 1], 0);
-      doc.line(x(today), top - 6, x(today), bottom); doc.setLineDashPattern([], 0);
-    }
+    if (today >= d0 && today <= d1) { doc.setDrawColor(208, 59, 59); doc.setLineWidth(0.4); doc.setLineDashPattern([1, 1], 0); doc.line(x(today), top - 6, x(today), bottom); doc.setLineDashPattern([], 0); }
     doc.setFontSize(7); doc.setTextColor(110); doc.setFont('helvetica', 'normal');
-    doc.text('Azul: serviço  •  Vermelho: caminho crítico  •  Parte escura: % executado  •  Linha tracejada: hoje', M, H - M + 2);
+    doc.text('Azul: atividade • Azul claro: duração provisória • Vermelho: caminho crítico • Parte escura: % executado • Bege: etapa • Tracejado: hoje', M, H - 6);
   }
-  doc.save(`Cronograma - ${safeName(obra.nome)}.pdf`);
+  doc.save(`Cronograma - ${safeName(o.nome)}.pdf`);
 }

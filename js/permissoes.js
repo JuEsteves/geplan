@@ -21,6 +21,9 @@ export const papel = () => nuvem.contexto()?.papel || null;
 /** O perfil atual pode alterar esta área? */
 export const pode = (area) => !papel() || (AREAS[papel()] || []).includes(area);
 
+/** O perfil vê custos internos? (cliente não vê — o banco também não envia esses dados a ele) */
+export const veCustos = () => papel() !== 'cliente';
+
 /** Aviso exibido na obra para perfis com permissão parcial. */
 export function avisoDoPerfil() {
   const p = papel();

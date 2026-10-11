@@ -14,10 +14,34 @@
 //    nada planejado nem medido até hoje; "Sem cronograma" sem EAP.
 //  • Custo realizado: soma das despesas lançadas (custo incorrido), igual ao Financeiro da obra.
 //  • Próximas atividades: atividades do último nível ainda sem avanço com início previsto nos próximos 14 dias.
+//  • Pedidos de compra (aba Financeiro da obra, tipo "Pedido de compra"):
+//      em andamento      = status "Em cotação", "Aprovado" ou "Entregue parcialmente" (cancelados e concluídos fora);
+//      aguardando cotação = status "Em cotação";
+//      entrega pendente   = compra aprovada ("Aprovado" ou "Entregue parcialmente") ainda não recebida por completo —
+//                           só "Entregue"/"Encerrado" contam como entregue (confirmação registrada pelo usuário);
+//      entrega atrasada   = entrega pendente com "data necessária" anterior a hoje;
+//      entrega próxima    = entrega pendente com "data necessária" entre hoje e os próximos 7 dias.
 import { avanco, fracPlanejada, pctRealAte } from './curvaS.js';
 import { pendenciasAbertas } from './execucao.js';
 import { resumoCustos } from './financeiro.js';
-import { todayDay } from './schedule.js';
+import { todayDay, toDay } from './schedule.js';
+
+const EM_ANDAMENTO = ['Em cotação', 'Aprovado', 'Entregue parcialmente'];
+const COMPRA_FEITA = ['Aprovado', 'Entregue parcialmente'];
+/** Situação dos pedidos de compra de uma obra (regras no cabeçalho). */
+export function pedidosDaObra(o, hoje = todayDay()) {
+  const pedidos = (o.compromissos || []).filter((k) => String(k.tipo || '').startsWith('Pedido'));
+  const pendentes = pedidos.filter((k) => COMPRA_FEITA.includes(k.status));
+  const dia = (k) => (k.dataNecessaria ? toDay(k.dataNecessaria) : null);
+  return {
+    total: pedidos.length,
+    emAndamento: pedidos.filter((k) => EM_ANDAMENTO.includes(k.status)),
+    aguardandoCotacao: pedidos.filter((k) => k.status === 'Em cotação'),
+    entregasPendentes: pendentes,
+    entregasAtrasadas: pendentes.filter((k) => dia(k) != null && dia(k) < hoje),
+    entregasProximas: pendentes.filter((k) => dia(k) != null && dia(k) >= hoje && dia(k) <= hoje + 7),
+  };
+}
 
 export const STATUS_INATIVOS = ['Concluída', 'Cancelada'];
 export const obraAtiva = (o) => !STATUS_INATIVOS.includes(o.status);
@@ -59,7 +83,7 @@ export function resumoObra(c, hoje = todayDay()) {
   if (temEap && !o.linhaBase) planejamento.push('Linha de base não aprovada');
   return {
     o, ativa: obraAtiva(o), temEap, av, temAvanco, situacao, atrasadas, pend, proximas, planejamento,
-    inicio: o.inicio, termino: temEap ? cron.termino : null, custos, temDespesas,
+    inicio: o.inicio, termino: temEap ? cron.termino : null, custos, temDespesas, pedidos: pedidosDaObra(o, hoje),
   };
 }
 
@@ -77,5 +101,9 @@ export function consolidado(resumos) {
     pendencias: ativas.reduce((s, r) => s + r.pend.length, 0),
     custoRealizado: comDespesas.length ? comDespesas.reduce((s, r) => s + r.custos.incorrido, 0) : null,
     obrasComDespesas: comDespesas.length,
+    temPedidos: resumos.some((r) => r.pedidos.total > 0),
+    pedidosEmAndamento: ativas.reduce((s, r) => s + r.pedidos.emAndamento.length, 0),
+    entregasPendentes: ativas.reduce((s, r) => s + r.pedidos.entregasPendentes.length, 0),
+    entregasAtrasadas: ativas.reduce((s, r) => s + r.pedidos.entregasAtrasadas.length, 0),
   };
 }

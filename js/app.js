@@ -14,7 +14,8 @@ import * as conta from './nuvem/conta.js';
 import * as nuvem from './nuvem/nuvem.js';
 import { viewEmpresa, acoesEmpresa, mudancasEmpresa, limparEmpresa } from './nuvem/telaEmpresa.js';
 import { renderMenu, viewModulo, MODULOS, obraUnica, linkModulo } from './navegacao.js';
-import { viewInicio, viewPendencias, resumoDe } from './inicio.js';
+import { viewInicio, viewPendencias, resumoDe, entradasInicio, mudancasInicio } from './inicio.js';
+import { viewConfiguracoes } from './configuracoes.js';
 
 // Modo nuvem (Supabase) quando js/config.js tiver URL e chave; senão, modo Google Drive (como antes).
 const NUVEM = nuvemConfigurada();
@@ -223,7 +224,7 @@ function parseRoute() {
   if (parts[0] === 'obra' && parts[1]) return { name: 'obra', id: parts[1], tab: parts[2] || 'painel', sub: parts[3] || '' };
   if (parts[0] === 'fases') return { name: 'fases', id: parts[1] };
   if (parts[0] === 'modulo' && parts[1]) return { name: 'modulo', modulo: parts[1] };
-  if (['obras', 'composicoes', 'drive', 'importar', 'sinapi', 'pendencias', 'inicio'].includes(parts[0])) return { name: parts[0] };
+  if (['obras', 'composicoes', 'drive', 'importar', 'sinapi', 'pendencias', 'inicio', 'configuracoes'].includes(parts[0])) return { name: parts[0] };
   return { name: 'inicio' };   // página inicial: Visão geral
 }
 
@@ -256,6 +257,7 @@ function render() {
   let html;
   if (route.name === 'inicio') html = viewInicio();
   else if (route.name === 'pendencias') html = viewPendencias();
+  else if (route.name === 'configuracoes') html = viewConfiguracoes();
   else if (route.name === 'modulo') html = viewModulo(route, resumoDe);
   else if (route.name === 'obra') html = viewObra(route);
   else if (route.name === 'composicoes') html = viewComposicoes();
@@ -372,8 +374,8 @@ const mudancasGerais = {
 
 /* ---------- eventos ---------- */
 const acoes = { ...acoesGerais, ...acoesBiblioteca, ...acoesObra, ...acoesFases, ...acoesSinapi, ...acoesGestao, ...acoesEmpresa };
-const mudancas = { ...mudancasGerais, ...mudancasBiblioteca, ...mudancasObra, ...mudancasFases, ...mudancasSinapi, ...mudancasGestao, ...mudancasEmpresa };
-const entradas = { ...entradasBiblioteca, ...entradasObra, ...entradasFases, ...entradasSinapi };
+const mudancas = { ...mudancasGerais, ...mudancasBiblioteca, ...mudancasObra, ...mudancasFases, ...mudancasSinapi, ...mudancasGestao, ...mudancasEmpresa, ...mudancasInicio };
+const entradas = { ...entradasBiblioteca, ...entradasObra, ...entradasFases, ...entradasSinapi, ...entradasInicio };
 
 $view.addEventListener('click', (e) => {
   const el = e.target.closest('[data-act]');
@@ -412,7 +414,9 @@ function renderSync() {
     };
     const [cls, label] = map[st.state] || map.local;
     $sync.className = `sync ${cls}`;
-    $sync.title = st.message || '';
+    // a hora só aparece depois que o banco confirmou a gravação (ou a leitura) — não é estimada
+    const conf = nuvem.ultimaConfirmacao();
+    $sync.title = [st.message, conf ? `Última confirmação do servidor: ${new Date(conf).toLocaleString('pt-BR')}` : 'Ainda sem confirmação do servidor nesta sessão'].filter(Boolean).join(' · ');
     $sync.innerHTML = `<span class="dot"></span>${label}`;
     return;
   }

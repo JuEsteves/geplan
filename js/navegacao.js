@@ -21,6 +21,7 @@ export const ICONES = {
   fisico: svg('<path d="M12 20V10M18 20V4M6 20v-4"/>'),
   tarefas: svg('<path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>'),
   compras: svg('<circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M2 3h3l3 12h11l2-8H6"/>'),
+  entregas: svg('<path d="M3 7h11v9H3zM14 10h4l3 3v3h-7z"/><circle cx="7" cy="18" r="1.6"/><circle cx="17" cy="18" r="1.6"/>'),
   fornecedores: svg('<path d="M3 21V9l9-6 9 6v12"/><path d="M9 21v-6h6v6"/>'),
   documentos: svg('<path d="M7 18a5 5 0 0 1-.9-9.9A6 6 0 0 1 17.7 7 4.5 4.5 0 0 1 17.5 18z"/>'),
   config: svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'),
@@ -36,7 +37,7 @@ export const MODULOS = {
   financeiro: { rotulo: 'Custos previstos e realizados', aba: 'financeiro', texto: 'Orçado, comprometido, incorrido e pago.' },
   diario: { rotulo: 'Diário de obra', aba: 'diario', texto: 'Registro diário: clima, equipe, serviços e ocorrências.' },
   painel: { rotulo: 'Acompanhamento físico', aba: 'painel', texto: 'Painel da obra: físico planejado × realizado, atrasos e prazos.' },
-  compras: { rotulo: 'Compras e materiais', aba: 'financeiro', secao: 'compras', texto: 'Pedidos de compra e contratos com fornecedores.' },
+  compras: { rotulo: 'Pedidos de compra', aba: 'financeiro', secao: 'compras', texto: 'Pedidos de compra e contratos registrados no Financeiro de cada obra.' },
 };
 
 function menu() {
@@ -60,15 +61,23 @@ function menu() {
       { id: 'mod-painel', rotulo: 'Acompanhamento físico', href: '#/modulo/painel', ico: 'fisico' },
       { id: 'pendencias', rotulo: 'Tarefas e pendências', href: '#/pendencias', ico: 'tarefas' },
     ] },
-    { grupo: 'Suprimentos e documentos', itens: [
-      { id: 'mod-compras', rotulo: 'Compras e materiais', href: '#/modulo/compras', ico: 'compras' },
-      { id: 'fornecedores', rotulo: 'Fornecedores', ico: 'fornecedores', futuro: 'Cadastro de fornecedores ainda não implementado (hoje o fornecedor é digitado em cada contrato/despesa).' },
-      { id: 'documentos', rotulo: 'Documentos', ico: 'documentos', futuro: 'Anexos e documentos das obras ainda não implementados.' },
+    { grupo: 'Suprimentos', itens: [
+      // o que existe hoje: pedidos de compra registrados na aba Financeiro de cada obra
+      { id: 'mod-compras', rotulo: 'Pedidos de compra', href: '#/modulo/compras', ico: 'compras' },
+      { id: 'solicitacoes', rotulo: 'Solicitações', ico: 'tarefas', futuro: 'Em desenvolvimento: solicitação de materiais pela obra, com vários itens.' },
+      { id: 'cotacoes', rotulo: 'Cotações e compras', ico: 'custos', futuro: 'Em desenvolvimento: cotações de vários fornecedores, comparação e aprovação.' },
+      { id: 'entregas', rotulo: 'Entregas e recebimentos', ico: 'entregas', futuro: 'Em desenvolvimento: acompanhamento da entrega e recebimento na obra.' },
+      { id: 'fornecedores', rotulo: 'Fornecedores', ico: 'fornecedores', futuro: 'Em desenvolvimento: cadastro central de fornecedores (hoje o fornecedor é digitado em cada contrato/despesa).' },
+    ] },
+    { grupo: 'Documentos', itens: [
+      { id: 'documentos', rotulo: 'Documentos da obra', ico: 'documentos', futuro: 'Em desenvolvimento: documentos, fotos e anexos das obras.' },
+      nuvem
+        ? { id: 'gdrive', rotulo: 'Google Drive', ico: 'documentos', futuro: 'No modo nuvem os dados ficam no banco da empresa; a integração com o Google Drive é usada só no modo local. Para uma cópia dos dados, use Administração › Configurações › Exportar.' }
+        : { id: 'drive', rotulo: 'Google Drive e backup', href: '#/drive', ico: 'documentos' },
     ] },
     { grupo: 'Administração', itens: [
-      nuvem
-        ? { id: 'drive', rotulo: 'Empresa, usuários e plano', href: '#/drive', ico: 'config' }
-        : { id: 'drive', rotulo: 'Google Drive e backup', href: '#/drive', ico: 'documentos' },
+      ...(nuvem ? [{ id: 'drive', rotulo: 'Empresa, usuários e plano', href: '#/drive', ico: 'fornecedores' }] : []),
+      { id: 'configuracoes', rotulo: 'Configurações', href: '#/configuracoes', ico: 'config' },
     ] },
   ];
 }

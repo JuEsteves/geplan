@@ -67,7 +67,8 @@ function menu() {
       { id: 'solicitacoes', rotulo: 'Solicitações', ico: 'tarefas', futuro: 'Em desenvolvimento: solicitação de materiais pela obra, com vários itens.' },
       { id: 'cotacoes', rotulo: 'Cotações e compras', ico: 'custos', futuro: 'Em desenvolvimento: cotações de vários fornecedores, comparação e aprovação.' },
       { id: 'entregas', rotulo: 'Entregas e recebimentos', ico: 'entregas', futuro: 'Em desenvolvimento: acompanhamento da entrega e recebimento na obra.' },
-      { id: 'fornecedores', rotulo: 'Fornecedores', ico: 'fornecedores', futuro: 'Em desenvolvimento: cadastro central de fornecedores (hoje o fornecedor é digitado em cada contrato/despesa).' },
+      nuvem ? { id: 'fornecedores', rotulo: 'Fornecedores', href: '#/fornecedores', ico: 'fornecedores' }
+        : { id: 'fornecedores', rotulo: 'Fornecedores', ico: 'fornecedores', futuro: 'O cadastro de fornecedores funciona no modo nuvem (banco de dados da empresa).' },
     ] },
     { grupo: 'Documentos', itens: [
       { id: 'documentos', rotulo: 'Documentos da obra', ico: 'documentos', futuro: 'Em desenvolvimento: documentos, fotos e anexos das obras.' },
@@ -93,6 +94,7 @@ export function itemAtivo(route) {
   if (route.name === 'modulo') return `mod-${route.modulo}`;
   if (route.name === 'importar') return 'obras';
   if (route.name === 'sinapi') return 'composicoes';
+  if (route.name === 'fornecedor') return 'fornecedores';
   return route.name;
 }
 

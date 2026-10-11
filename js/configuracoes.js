@@ -4,6 +4,7 @@ import { esc, I } from './ui.js';
 import { isoBR, toDay, weekday } from './schedule.js';
 import { pode } from './permissoes.js';
 import { configurado as nuvemConfigurada } from './nuvem/supabase.js';
+import { secaoCategorias } from './fornecedores.js';
 
 export function viewConfiguracoes() {
   const lib = store.lib();
@@ -30,6 +31,7 @@ export function viewConfiguracoes() {
       <p class="muted small" style="margin:0">${(lib.composicoes || []).length} composição(ões) na biblioteca. A base SINAPI é importada da planilha mensal da Caixa e fica neste aparelho.</p>
       <div class="row"><a class="btn" href="#/composicoes">Composições</a><a class="btn" href="#/sinapi">Base SINAPI</a></div>
     </div>
+    ${secaoCategorias()}
     <div class="card card-pad stack">
       <h2>Exportar dados</h2>
       <p class="muted small" style="margin:0">Arquivo JSON com as obras que você vê e a biblioteca (composições, feriados e modelos de EAP). ${nuvem ? 'É uma cópia para conferência e portabilidade; o backup oficial é o do banco de dados.' : 'Use também para levar os dados a outro aparelho.'}</p>

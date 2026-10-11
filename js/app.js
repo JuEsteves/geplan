@@ -16,6 +16,7 @@ import { viewEmpresa, acoesEmpresa, mudancasEmpresa, limparEmpresa } from './nuv
 import { renderMenu, viewModulo, MODULOS, obraUnica, linkModulo } from './navegacao.js';
 import { viewInicio, viewPendencias, resumoDe, entradasInicio, mudancasInicio } from './inicio.js';
 import { viewConfiguracoes } from './configuracoes.js';
+import { viewFornecedores, viewFornecedor, acoesFornecedores, entradasFornecedores, mudancasFornecedores, limparFornecedores } from './fornecedores.js';
 
 // Modo nuvem (Supabase) quando js/config.js tiver URL e chave; senão, modo Google Drive (como antes).
 const NUVEM = nuvemConfigurada();
@@ -201,7 +202,7 @@ async function sairNuvem() {
   if (nuvem.pendente()) await nuvem.enviar().catch(() => {});
   if (nuvem.pendente() && !(await ask('Há alterações que ainda NÃO foram enviadas para a nuvem e serão perdidas. Sair mesmo assim?', 'Sair'))) return;
   await conta.sair().catch(() => {});
-  nuvem.encerrar(); store.clearLocal(); limparEmpresa();
+  nuvem.encerrar(); store.clearLocal(); limparEmpresa(); limparFornecedores();
   sessaoAtual = null; authorized = false;
   location.hash = '#/inicio';
   renderGateNuvem('entrar');
@@ -211,7 +212,7 @@ window.addEventListener('geplan:aviso', (e) => toast(e.detail, 7000));
 window.addEventListener('geplan:trocar-empresa', async (e) => {
   await nuvem.enviar().catch(() => {});
   if (nuvem.pendente() && !(await ask('Há alterações não enviadas nesta empresa. Trocar mesmo assim (elas serão perdidas)?', 'Trocar'))) return queueRender();
-  nuvem.encerrar(); store.clearLocal();
+  nuvem.encerrar(); store.clearLocal(); limparFornecedores();
   location.hash = '#/inicio';
   await entrarNaEmpresa(e.detail);
 });
@@ -224,6 +225,7 @@ function parseRoute() {
   if (parts[0] === 'obra' && parts[1]) return { name: 'obra', id: parts[1], tab: parts[2] || 'painel', sub: parts[3] || '' };
   if (parts[0] === 'fases') return { name: 'fases', id: parts[1] };
   if (parts[0] === 'modulo' && parts[1]) return { name: 'modulo', modulo: parts[1] };
+  if (parts[0] === 'fornecedores') return parts[1] ? { name: 'fornecedor', id: parts[1] } : { name: 'fornecedores' };
   if (['obras', 'composicoes', 'drive', 'importar', 'sinapi', 'pendencias', 'inicio', 'configuracoes'].includes(parts[0])) return { name: parts[0] };
   return { name: 'inicio' };   // página inicial: Visão geral
 }
@@ -258,6 +260,8 @@ function render() {
   if (route.name === 'inicio') html = viewInicio();
   else if (route.name === 'pendencias') html = viewPendencias();
   else if (route.name === 'configuracoes') html = viewConfiguracoes();
+  else if (route.name === 'fornecedores') html = viewFornecedores();
+  else if (route.name === 'fornecedor') html = viewFornecedor(route);
   else if (route.name === 'modulo') html = viewModulo(route, resumoDe);
   else if (route.name === 'obra') html = viewObra(route);
   else if (route.name === 'composicoes') html = viewComposicoes();
@@ -373,9 +377,9 @@ const mudancasGerais = {
 };
 
 /* ---------- eventos ---------- */
-const acoes = { ...acoesGerais, ...acoesBiblioteca, ...acoesObra, ...acoesFases, ...acoesSinapi, ...acoesGestao, ...acoesEmpresa };
-const mudancas = { ...mudancasGerais, ...mudancasBiblioteca, ...mudancasObra, ...mudancasFases, ...mudancasSinapi, ...mudancasGestao, ...mudancasEmpresa, ...mudancasInicio };
-const entradas = { ...entradasBiblioteca, ...entradasObra, ...entradasFases, ...entradasSinapi, ...entradasInicio };
+const acoes = { ...acoesGerais, ...acoesBiblioteca, ...acoesObra, ...acoesFases, ...acoesSinapi, ...acoesGestao, ...acoesEmpresa, ...acoesFornecedores };
+const mudancas = { ...mudancasGerais, ...mudancasBiblioteca, ...mudancasObra, ...mudancasFases, ...mudancasSinapi, ...mudancasGestao, ...mudancasEmpresa, ...mudancasInicio, ...mudancasFornecedores };
+const entradas = { ...entradasBiblioteca, ...entradasObra, ...entradasFases, ...entradasSinapi, ...entradasInicio, ...entradasFornecedores };
 
 $view.addEventListener('click', (e) => {
   const el = e.target.closest('[data-act]');

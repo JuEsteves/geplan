@@ -10,6 +10,7 @@ import { toDay, toISO, fmtBR, isoBR, todayDay, todayISO, fmtNum, fmtBRL } from '
 import { esc, I, ui, toast, ask, info, formDialog, commit, queueRender, parseNum, fmtIn } from './ui.js';
 import { contexto } from './obra.js';
 import { atividadesAtrasadas } from './indicadores.js';
+import { datalistFornecedores, idDoFornecedorPorNome } from './fornecedores.js';
 import { LIBS, loadScript } from './libs.js';
 
 export const usuario = () => savedUser()?.emailAddress || '';
@@ -350,7 +351,7 @@ async function dialogoCompromisso(o, c, k, novo) {
   const form = await dialogo(`${novo ? 'Novo' : 'Editar'} ${k.tipo.toLowerCase()}`, `
     <div class="grid-form">
       <label class="field">Número<input name="numero" value="${esc(k.numero || '')}"></label>
-      <label class="field">Fornecedor<input name="fornecedor" required value="${esc(k.fornecedor || '')}"></label>
+      <label class="field">Fornecedor<input name="fornecedor" required list="lista-fornecedores" autocomplete="off" value="${esc(k.fornecedor || '')}">${datalistFornecedores()}</label>
       <label class="field">Categoria<select name="categoria">${CATEGORIAS_CUSTO.map((x) => `<option ${x === k.categoria ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
       <label class="field">Valor (R$)<input name="valor" inputmode="decimal" required value="${k.valor != null ? fmtIn(k.valor, 2) : ''}"></label>
       <label class="field">Status<select name="status">${STATUS_COMP.map((x) => `<option ${x === k.status ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
@@ -380,7 +381,7 @@ async function dialogoCompromisso(o, c, k, novo) {
     return commit(o);
   }
   Object.assign(k, {
-    numero: fd.get('numero').trim(), fornecedor: fd.get('fornecedor').trim(), categoria: fd.get('categoria'), valor: parseNum(fd.get('valor')) || 0,
+    numero: fd.get('numero').trim(), fornecedor: fd.get('fornecedor').trim(), fornecedorId: idDoFornecedorPorNome(fd.get('fornecedor')), categoria: fd.get('categoria'), valor: parseNum(fd.get('valor')) || 0,
     status: fd.get('status'), data: fd.get('data'), objeto: fd.get('objeto').trim(), itemId: fd.get('itemId') || null,
     aditivos: [...form.querySelectorAll('[data-lista="ad"] .lin')].map((l) => ({ data: l.querySelector('[name=adData]').value, valor: parseNum(l.querySelector('[name=adValor]').value) || 0, descricao: l.querySelector('[name=adDesc]').value.trim() })).filter((a) => a.valor),
   });
@@ -395,7 +396,7 @@ async function dialogoDespesa(o, c, d, novo) {
     <div class="grid-form">
       <label class="field">Data<input type="date" name="data" required value="${d.data || todayISO()}"></label>
       <label class="field">Documento (NF, recibo…)<input name="documento" value="${esc(d.documento || '')}"></label>
-      <label class="field">Fornecedor<input name="fornecedor" required value="${esc(d.fornecedor || '')}"></label>
+      <label class="field">Fornecedor<input name="fornecedor" required list="lista-fornecedores" autocomplete="off" value="${esc(d.fornecedor || '')}">${datalistFornecedores()}</label>
       <label class="field">Valor (R$)<input name="valor" inputmode="decimal" required value="${d.valor != null ? fmtIn(d.valor, 2) : ''}"></label>
       <label class="field">Categoria<select name="categoria">${CATEGORIAS_CUSTO.map((x) => `<option ${x === d.categoria ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
       <label class="field">Vencimento<input type="date" name="vencimento" value="${d.vencimento || ''}"></label>
@@ -432,7 +433,7 @@ async function dialogoDespesa(o, c, d, novo) {
     return commit(o);
   }
   const nova = {
-    ...d, data: fd.get('data'), documento: fd.get('documento').trim(), fornecedor: fd.get('fornecedor').trim(), valor: parseNum(fd.get('valor')) || 0,
+    ...d, data: fd.get('data'), documento: fd.get('documento').trim(), fornecedor: fd.get('fornecedor').trim(), fornecedorId: idDoFornecedorPorNome(fd.get('fornecedor')), valor: parseNum(fd.get('valor')) || 0,
     categoria: fd.get('categoria'), vencimento: fd.get('vencimento'), descricao: fd.get('descricao').trim(), compromissoId: fd.get('compromissoId') || null, itemId: fd.get('itemId') || null,
     pagamentos: [...form.querySelectorAll('[data-lista="pg"] .lin')].map((l) => ({ data: l.querySelector('[name=pgData]').value, valor: parseNum(l.querySelector('[name=pgValor]').value) || 0 })).filter((p) => p.valor),
   };

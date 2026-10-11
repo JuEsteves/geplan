@@ -8,6 +8,7 @@ import { resumoObra, consolidado } from './indicadores.js';
 import { pode, veCustos } from './permissoes.js';
 import { ICONES } from './navegacao.js';
 import { STATUS_OBRA } from './model.js';
+import { configurado as nuvemConfigurada } from './nuvem/supabase.js';
 
 // Cache por versão da obra e da biblioteca (o cálculo do cronograma de várias obras não roda a cada clique).
 const cache = new Map();
@@ -51,7 +52,7 @@ const MODULOS = [
   ] },
   { grupo: 'Suprimentos e documentos', itens: [
     { r: 'Pedidos de compra', ico: 'compras', href: '#/modulo/compras', d: 'Pedidos registrados no Financeiro de cada obra.' },
-    { r: 'Fornecedores', ico: 'fornecedores', d: 'Cadastro central de fornecedores.' },
+    { r: 'Fornecedores', ico: 'fornecedores', d: 'Cadastro central: contatos, condições, documentos e histórico.', ...(nuvemConfigurada() ? { href: '#/fornecedores' } : {}) },
     { r: 'Documentos', ico: 'documentos', d: 'Documentos, fotos e anexos das obras.' },
   ] },
 ];

@@ -25,14 +25,21 @@ coeficientes de produtividade (h/unid). Fluxo:
 
 O menu lateral é organizado por áreas: **Visão geral** (página inicial), **Planejamento** (Obras, EAP e fases,
 Cronograma, Curva S), **Orçamento e custos** (Orçamentos, Composições, Medições, Custos previstos e realizados),
-**Execução e controle** (Diário de obra, Acompanhamento físico, Tarefas e pendências), **Suprimentos e documentos**
-(Compras e materiais; Fornecedores e Documentos aparecem como "em breve") e **Administração** (Google Drive e backup,
-ou Empresa/usuários/plano no modo nuvem). Os módulos que existem dentro de cada obra abrem um seletor de obra
-(ou vão direto, se houver uma só). No celular, o rodapé tem Início, Obras, Cronograma, Diário e **Menu** (todas as áreas).
+**Execução e controle** (Diário de obra, Acompanhamento físico, Tarefas e pendências), **Suprimentos** (Pedidos de
+compra; Solicitações, Cotações, Entregas e Fornecedores aparecem como "em breve"), **Documentos** (Documentos da obra
+"em breve"; Google Drive no modo local) e **Administração** (Empresa/usuários/plano no modo nuvem e Configurações).
+Os módulos que existem dentro de cada obra abrem um seletor de obra (ou vão direto, se houver uma só). No celular,
+o rodapé tem Início, Obras, Cronograma, Diário e **Menu** (todas as áreas).
 
-A **Visão geral** mostra obras ativas, avanço físico médio, atividades atrasadas, pendências do diário, custo
-realizado, as obras com situação do cronograma, atalhos e as pendências — tudo calculado com os dados salvos e pelas
-mesmas regras do painel de cada obra. Critérios documentados em `js/indicadores.js`.
+A **Visão geral** mostra 6 indicadores clicáveis (obras ativas, avanço físico médio, atividades atrasadas, custo
+realizado, pedidos em andamento e entregas pendentes), as obras com busca e filtros (status e situação do cronograma),
+o painel de atenção (atrasos, entregas, pedidos em cotação, pendências do diário) e atalhos agrupados. Sem obras,
+apresenta os módulos e os passos para começar. Tudo é calculado com os dados salvos e pelas mesmas regras do painel
+de cada obra; critérios em `js/indicadores.js`. **Configurações** reúne feriados gerais, modelo inicial de fases,
+composições/SINAPI e exportação de dados.
+
+O indicador de salvamento (canto superior direito) só mostra "Salvo na nuvem" depois que o servidor confirma a
+gravação; ao passar o mouse, mostra a hora da última confirmação. Se a gravação falhar, mostra "Erro ao salvar" e o motivo.
 
 ## Gestão da obra (abas da obra)
 
@@ -174,7 +181,8 @@ js/config.js            Client ID do Google, contas autorizadas e conexão do Su
 js/permissoes.js        o que cada perfil pode alterar (só interface; quem decide é o banco)
 js/navegacao.js         menu por áreas (computador e celular) e seletor de obra dos módulos
 js/inicio.js            Visão geral (página inicial) e Tarefas e pendências
-js/indicadores.js       indicadores por obra e consolidados (critérios de avanço, atraso, custo)
+js/indicadores.js       indicadores por obra e consolidados (critérios de avanço, atraso, custo, pedidos e entregas)
+js/configuracoes.js     Administração › Configurações
 js/nuvem/               modo nuvem: mapeamento app ↔ tabelas, sincronização, login, empresa
 supabase/               migrações SQL, planos iniciais, guia de configuração e simulador de testes
 sw.js, manifest.webmanifest, icons/   app instalável e offline

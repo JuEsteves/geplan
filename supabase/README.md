@@ -15,6 +15,7 @@ antigo (dados no aparelho + Google Drive). Preenchidos, passa a usar o banco.
 | `…0003_orcamento_planejamento.sql` | itens do orçamento (total calculado pelo banco), revisões, EAP/atividades, dependências FS/SS/FF/SF, vínculos orçamento × EAP (soma ≤ 100%), linhas de base |
 | `…0004_execucao_financeiro.sql` | medições (uma por atividade/data, ≤ 100%, % da atividade recalculado no servidor), diário (equipe, serviços, ocorrências), contratos/pedidos, aditivos, despesas, pagamentos (≤ valor da despesa) |
 | `…0005_indicadores.sql` | `bdi_tcu()`, views de orçamento, vínculos, contratos, custos (comprometido/incorrido/pago/a incorrer) e uso do plano |
+| `…0006_fornecedores.sql` | fornecedores, categorias configuráveis (14 padrão por empresa), categorias secundárias, avaliações manuais, documentos; `supplier_id` em contratos e despesas; validação de CPF/CNPJ; **bucket privado `documentos` no Storage** e suas políticas (detalhes em `docs/FORNECEDORES.md`) |
 
 Todas as tabelas têm **RLS ligado**. Valores em dinheiro e quantidades usam `NUMERIC` (sem erro de ponto flutuante).
 Registros financeiros e históricos não são apagados pelo app: exclusão **lógica** (`deleted_at`) e trilha em `audit_log`.

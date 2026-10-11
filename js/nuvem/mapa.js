@@ -267,7 +267,7 @@ export function obraParaLinhas(o, orgId) {
   for (const k of o.compromissos || []) {
     L.contracts.push({ id: k.id, project_id: P, kind: String(k.tipo || '').startsWith('Pedido') ? 'Pedido' : 'Contrato',   // no app: "Pedido de compra" number: txt(k.numero),
       supplier_name: txt(k.fornecedor), category: k.categoria || 'Outro', amount: arr(num0(k.valor), 2), status: txt(k.status),
-      contract_date: data(k.data), scope: txt(k.objeto), budget_item_id: ref(k.itemId, itensIds), needed_date: data(k.dataNecessaria),
+      contract_date: data(k.data), scope: txt(k.objeto), budget_item_id: ref(k.itemId, itensIds), supplier_id: k.fornecedorId || null, needed_date: data(k.dataNecessaria),
       quantity: arr(num(k.quantidade), 4), unit: txt(k.unidade), quantity_received: arr(num(k.quantidadeRecebida), 4) });
     for (const a of k.aditivos || []) {
       L.contract_amendments.push({ id: idDe(a), contract_id: k.id, project_id: P, amend_date: data(a.data), amount: arr(num0(a.valor), 2), description: txt(a.descricao) });
@@ -276,7 +276,7 @@ export function obraParaLinhas(o, orgId) {
   for (const d of o.despesas || []) {
     L.expenses.push({ id: d.id, project_id: P, expense_date: data(d.data), document: txt(d.documento), supplier_name: txt(d.fornecedor),
       description: txt(d.descricao), category: d.categoria || 'Outro', contract_id: ref(d.compromissoId, compIds),
-      budget_item_id: ref(d.itemId, itensIds), amount: arr(num0(d.valor), 2), due_date: data(d.vencimento) });
+      budget_item_id: ref(d.itemId, itensIds), supplier_id: d.fornecedorId || null, amount: arr(num0(d.valor), 2), due_date: data(d.vencimento) });
     for (const p of d.pagamentos || []) {
       L.payments.push({ id: idDe(p), expense_id: d.id, project_id: P, pay_date: data(p.data), amount: arr(num0(p.valor), 2) });
     }
@@ -376,7 +376,7 @@ export function linhasParaObra(L) {
     compromissos: (L.contracts || []).map((k) => {
       const c = {
         id: k.id, tipo: k.kind === 'Pedido' ? 'Pedido de compra' : 'Contrato', numero: k.number, fornecedor: k.supplier_name, categoria: k.category, valor: Number(k.amount),
-        status: k.status, data: dataBR(k.contract_date), objeto: k.scope, itemId: k.budget_item_id || null,
+        status: k.status, data: dataBR(k.contract_date), objeto: k.scope, itemId: k.budget_item_id || null, fornecedorId: k.supplier_id || null,
         aditivos: (aditivos.get(k.id) || []).map((a) => ({ id: a.id, data: dataBR(a.amend_date), valor: Number(a.amount), descricao: a.description })),
       };
       if (k.kind === 'Pedido') Object.assign(c, { dataNecessaria: dataBR(k.needed_date), quantidade: k.quantity == null ? null : Number(k.quantity), unidade: k.unit, quantidadeRecebida: k.quantity_received == null ? null : Number(k.quantity_received) });
@@ -384,7 +384,7 @@ export function linhasParaObra(L) {
     }),
     despesas: (L.expenses || []).map((d) => ({
       id: d.id, data: d.expense_date, documento: d.document, fornecedor: d.supplier_name, descricao: d.description, categoria: d.category,
-      compromissoId: d.contract_id || null, itemId: d.budget_item_id || null, valor: Number(d.amount), vencimento: dataBR(d.due_date),
+      compromissoId: d.contract_id || null, itemId: d.budget_item_id || null, fornecedorId: d.supplier_id || null, valor: Number(d.amount), vencimento: dataBR(d.due_date),
       pagamentos: (pagamentos.get(d.id) || []).map((x) => ({ id: x.id, data: x.pay_date, valor: Number(x.amount) })),
     })),
     historico: [...(L.project_history || [])].sort((a, b) => txt(b.at).localeCompare(txt(a.at))).map((h) => ({

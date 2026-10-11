@@ -265,7 +265,7 @@ export function obraParaLinhas(o, orgId) {
 
   const compIds = new Set((o.compromissos || []).map((k) => k.id));
   for (const k of o.compromissos || []) {
-    L.contracts.push({ id: k.id, project_id: P, kind: k.tipo === 'Pedido' ? 'Pedido' : 'Contrato', number: txt(k.numero),
+    L.contracts.push({ id: k.id, project_id: P, kind: String(k.tipo || '').startsWith('Pedido') ? 'Pedido' : 'Contrato',   // no app: "Pedido de compra" number: txt(k.numero),
       supplier_name: txt(k.fornecedor), category: k.categoria || 'Outro', amount: arr(num0(k.valor), 2), status: txt(k.status),
       contract_date: data(k.data), scope: txt(k.objeto), budget_item_id: ref(k.itemId, itensIds), needed_date: data(k.dataNecessaria),
       quantity: arr(num(k.quantidade), 4), unit: txt(k.unidade), quantity_received: arr(num(k.quantidadeRecebida), 4) });
@@ -375,7 +375,7 @@ export function linhasParaObra(L) {
       observacoes: d.notes, criadoEm: ts(d.created_at), atualizadoEm: ts(d.updated_at || d.created_at) })),
     compromissos: (L.contracts || []).map((k) => {
       const c = {
-        id: k.id, tipo: k.kind, numero: k.number, fornecedor: k.supplier_name, categoria: k.category, valor: Number(k.amount),
+        id: k.id, tipo: k.kind === 'Pedido' ? 'Pedido de compra' : 'Contrato', numero: k.number, fornecedor: k.supplier_name, categoria: k.category, valor: Number(k.amount),
         status: k.status, data: dataBR(k.contract_date), objeto: k.scope, itemId: k.budget_item_id || null,
         aditivos: (aditivos.get(k.id) || []).map((a) => ({ id: a.id, data: dataBR(a.amend_date), valor: Number(a.amount), descricao: a.description })),
       };

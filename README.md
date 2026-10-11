@@ -38,10 +38,9 @@ Indicadores: `EV = Σ custo × % executado`, `CPI = EV ÷ custo incorrido`, `SPI
 "Financeiro realizado" é custo incorrido — **não** é usado como avanço físico.
 
 ### Limitações conhecidas
-- **Sem servidor**: os dados ficam no aparelho e no Google Drive de quem entra. Não há várias pessoas editando a mesma obra
-  ao mesmo tempo nem perfis com permissões diferentes. A lista de e-mails em `js/config.js` só controla quem passa da tela de
-  entrada — **não é segurança de servidor**. Para multiusuário com permissões verificadas no servidor é preciso um backend
-  (ex.: Supabase ou Firebase), que depende de criar a conta e as credenciais.
+- **Modo Google Drive** (sem banco configurado): os dados ficam no aparelho e no Drive de quem entra, sem várias pessoas
+  na mesma obra nem perfis; a lista de e-mails em `js/config.js` só controla a tela de entrada — **não é segurança de
+  servidor**. O **modo nuvem** (Supabase, abaixo) resolve isso com permissões verificadas no banco.
 - Fotos e anexos no diário, cotações de compra e integração com a base SINAPI oficial (arquivo real da Caixa) ainda não foram feitos/validados.
 
 ### Predecessoras (mesma notação da planilha)

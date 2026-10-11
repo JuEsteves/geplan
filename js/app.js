@@ -13,6 +13,8 @@ import { configurado as nuvemConfigurada } from './nuvem/supabase.js';
 import * as conta from './nuvem/conta.js';
 import * as nuvem from './nuvem/nuvem.js';
 import { viewEmpresa, acoesEmpresa, mudancasEmpresa, limparEmpresa } from './nuvem/telaEmpresa.js';
+import { renderMenu, viewModulo, MODULOS, obraUnica, linkModulo } from './navegacao.js';
+import { viewInicio, viewPendencias, resumoDe } from './inicio.js';
 
 // Modo nuvem (Supabase) quando js/config.js tiver URL e chave; senão, modo Google Drive (como antes).
 const NUVEM = nuvemConfigurada();
@@ -200,7 +202,7 @@ async function sairNuvem() {
   await conta.sair().catch(() => {});
   nuvem.encerrar(); store.clearLocal(); limparEmpresa();
   sessaoAtual = null; authorized = false;
-  location.hash = '#/obras';
+  location.hash = '#/inicio';
   renderGateNuvem('entrar');
 }
 window.addEventListener('geplan:sair', () => sairNuvem().catch((e) => toast(e.message)));
@@ -209,26 +211,28 @@ window.addEventListener('geplan:trocar-empresa', async (e) => {
   await nuvem.enviar().catch(() => {});
   if (nuvem.pendente() && !(await ask('Há alterações não enviadas nesta empresa. Trocar mesmo assim (elas serão perdidas)?', 'Trocar'))) return queueRender();
   nuvem.encerrar(); store.clearLocal();
-  location.hash = '#/obras';
+  location.hash = '#/inicio';
   await entrarNaEmpresa(e.detail);
 });
 
 /* ---------- rotas ---------- */
+let ultimoHash = '';
 function parseRoute() {
   const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
   if (parts[0] === 'convite' && parts[1]) return { name: 'convite', token: parts[1] };
-  if (parts[0] === 'obra' && parts[1]) return { name: 'obra', id: parts[1], tab: parts[2] || 'atividades' };
+  if (parts[0] === 'obra' && parts[1]) return { name: 'obra', id: parts[1], tab: parts[2] || 'painel', sub: parts[3] || '' };
   if (parts[0] === 'fases') return { name: 'fases', id: parts[1] };
-  if (['composicoes', 'drive', 'importar', 'sinapi'].includes(parts[0])) return { name: parts[0] };
-  return { name: 'obras' };
+  if (parts[0] === 'modulo' && parts[1]) return { name: 'modulo', modulo: parts[1] };
+  if (['obras', 'composicoes', 'drive', 'importar', 'sinapi', 'pendencias', 'inicio'].includes(parts[0])) return { name: parts[0] };
+  return { name: 'inicio' };   // página inicial: Visão geral
 }
 
 function render() {
   const route = parseRoute();
   if (route.name === 'convite') {
-    if (!NUVEM) { location.hash = '#/obras'; return; }
+    if (!NUVEM) { location.hash = '#/inicio'; return; }
     sessionStorage.setItem('geplan:convite', route.token);
-    history.replaceState(null, '', location.pathname + location.search + '#/obras');
+    history.replaceState(null, '', location.pathname + location.search + '#/inicio');
     if (authorized) { entrarNaEmpresa().catch((e) => toast(e.message)); return; }
     return renderGateNuvem(gateModo === 'carregando' ? 'carregando' : 'entrar');
   }
@@ -240,8 +244,20 @@ function render() {
   const scrollGantt = document.getElementById('gantt')?.scrollLeft;
   const scrollTree = document.querySelector('.tree-wrap')?.scrollLeft;
 
+  // módulos por obra: com uma obra só, abre direto nela
+  if (route.name === 'modulo' && MODULOS[route.modulo]) {
+    const unica = obraUnica();
+    if (unica) { history.replaceState(null, '', location.pathname + location.search + linkModulo(unica, MODULOS[route.modulo])); return render(); }
+  }
+  if (route.name === 'obra') { try { localStorage.setItem('planobras:ultimaObra', route.id); } catch {} }
+  renderMenu(route);
+  document.body.classList.remove('menu-aberto');
+
   let html;
-  if (route.name === 'obra') html = viewObra(route);
+  if (route.name === 'inicio') html = viewInicio();
+  else if (route.name === 'pendencias') html = viewPendencias();
+  else if (route.name === 'modulo') html = viewModulo(route, resumoDe);
+  else if (route.name === 'obra') html = viewObra(route);
   else if (route.name === 'composicoes') html = viewComposicoes();
   else if (route.name === 'sinapi') html = viewSinapi();
   else if (route.name === 'fases') html = viewFases(route);
@@ -250,9 +266,9 @@ function render() {
   else html = viewObras();
   $view.innerHTML = html;
 
-  document.querySelectorAll('[data-nav]').forEach((a) => {
-    a.classList.toggle('active', a.dataset.nav === route.name || (a.dataset.nav === 'obras' && route.name === 'obra') || (a.dataset.nav === 'composicoes' && route.name === 'sinapi'));
-  });
+  // "Compras e materiais" abre o Financeiro da obra já na seção de pedidos (só ao chegar na rota)
+  if (route.sub === 'compras' && ultimoHash !== location.hash) setTimeout(() => document.getElementById('secao-compras')?.scrollIntoView({ block: 'start' }));
+  ultimoHash = location.hash;
   if (focusKey) {
     const el = $view.querySelector(`[data-key="${CSS.escape(focusKey)}"]`);
     if (el) {
@@ -325,7 +341,7 @@ const acoesGerais = {
     drive.disconnect();
     store.clearLocal();
     authorized = false;
-    location.hash = '#/obras';
+    location.hash = '#/inicio';
     render();
   },
   async genAccessCode() {
@@ -423,12 +439,18 @@ nuvem.onStatus(() => { renderSync(); if (parseRoute().name === 'drive') queueRen
 window.addEventListener('planobras:remote-change', () => { queueRender(); if (!NUVEM) toast('Dados atualizados a partir do Google Drive.'); });
 window.addEventListener('hashchange', () => { window.scrollTo(0, 0); render(); });
 
+// Menu completo no celular: o botão "Menu" do rodapé abre o menu lateral por cima da tela.
+document.getElementById('bottomnav').addEventListener('click', (e) => {
+  if (!e.target.closest('[data-menu-celular]')) return;
+  e.preventDefault();
+  document.body.classList.toggle('menu-aberto');
+});
+document.getElementById('menuFundo').addEventListener('click', () => document.body.classList.remove('menu-aberto'));
+document.getElementById('sidenav').addEventListener('click', (e) => { if (e.target.closest('a')) document.body.classList.remove('menu-aberto'); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') document.body.classList.remove('menu-aberto'); });
+
 /** Início no modo nuvem: retoma a sessão salva (ou mostra o login). */
 async function iniciarNuvem() {
-  document.querySelectorAll('[data-nav="drive"]').forEach((a) => {
-    a.lastChild.textContent = 'Empresa';
-    a.title = 'Empresa, pessoas, plano e sincronização';
-  });
   renderGateNuvem('carregando', 'Conectando…');
   renderSync();
   try {
@@ -447,7 +469,7 @@ async function iniciarNuvem() {
 // Início: entra direto se esta conta já fez login neste aparelho e está autorizada
 (async () => {
   if (NUVEM) {
-    if (parseRoute().name === 'convite') { sessionStorage.setItem('geplan:convite', parseRoute().token); history.replaceState(null, '', location.pathname + location.search + '#/obras'); }
+    if (parseRoute().name === 'convite') { sessionStorage.setItem('geplan:convite', parseRoute().token); history.replaceState(null, '', location.pathname + location.search + '#/inicio'); }
     return iniciarNuvem().catch((e) => renderGateNuvem('entrar', e.message));
   }
   const u = drive.savedUser();

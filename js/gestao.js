@@ -9,6 +9,7 @@ import { quantidadePlanejada, metodoMedicao, medicoesDe, registrarMedicao, remov
 import { toDay, toISO, fmtBR, isoBR, todayDay, todayISO, fmtNum, fmtBRL } from './schedule.js';
 import { esc, I, ui, toast, ask, info, formDialog, commit, queueRender, parseNum, fmtIn } from './ui.js';
 import { contexto } from './obra.js';
+import { atividadesAtrasadas } from './indicadores.js';
 import { LIBS, loadScript } from './libs.js';
 
 export const usuario = () => savedUser()?.emailAddress || '';
@@ -52,11 +53,11 @@ export function tabPainel(c) {
   const va = valorAgregado({ bac: av.finTotal, pv: av.finPlan, ev: av.valorAgregado, ac: incorridoAte(o, hoje) });
   const fl = folhas(c);
   const naEtapa = (n) => !etapaF || raizId(c, n.a) === etapaF;
-  const atrasadas = fl.filter((n) => naEtapa(n) && pctRealAte(o, n.a, hoje) + 0.5 < fracPlanejada(n, cron.cal, hoje, o) * 100);
+  const atrasadas = atividadesAtrasadas(c, hoje, naEtapa);   // mesma regra da Visão geral (js/indicadores.js)
   const criticas = fl.filter((n) => naEtapa(n) && n.critico && pctRealAte(o, n.a, hoje) < 100);
   const marcos = [...cron.nos.values()].filter((n) => naEtapa(n) && ((n.folha && n.dur === 0) || n.a.nivel === 1) && n.termino >= hoje).sort((a, b) => a.termino - b.termino).slice(0, 6);
   const pend = pendenciasAbertas(o);
-  const compras = (o.compromissos || []).filter((k) => k.tipo === 'Pedido de compra' && !['Entregue', 'Encerrado', 'Cancelado'].includes(k.status));
+  const compras = (o.compromissos || []).filter((k) => String(k.tipo || '').startsWith('Pedido') && !['Entregue', 'Encerrado', 'Cancelado'].includes(k.status));
   let desvioPrazo = null;
   if (o.linhaBase) {
     const bt = Math.max(...Object.values(o.linhaBase.itens).map((b) => b.termino));
@@ -328,7 +329,7 @@ export function tabFinanceiro(c) {
       ${kpi('Previsão de custo final (EAC)', fmtBRL(va.eac), va.cpi != null ? `CPI ${fmtNum(va.cpi, 2)}` : '')}
     </div>
     ${r.alertas.length ? `<div class="alert err">${r.alertas.map(esc).join('<br>')}</div>` : ''}
-    <div class="row"><h2 style="flex:1">Contratos e pedidos de compra</h2><button class="btn sm" data-act="compNovo" data-t="Contrato">${I.plus} Contrato</button><button class="btn sm primary" data-act="compNovo" data-t="Pedido de compra">${I.plus} Pedido de compra</button></div>
+    <div class="row" id="secao-compras"><h2 style="flex:1">Contratos e pedidos de compra</h2><button class="btn sm" data-act="compNovo" data-t="Contrato">${I.plus} Contrato</button><button class="btn sm primary" data-act="compNovo" data-t="Pedido de compra">${I.plus} Pedido de compra</button></div>
     ${comps ? `<div class="card table-wrap"><table class="data"><thead><tr><th>Documento</th><th>Fornecedor / objeto</th><th>Categoria</th><th class="num">Valor + aditivos</th><th class="num">Incorrido</th><th class="num">Saldo</th><th>Status</th><th></th></tr></thead><tbody>${comps}</tbody></table></div>` : vazioCard('Nenhum contrato ou pedido. Registre aqui os compromissos assumidos com fornecedores e empreiteiros.')}
     <div class="row"><h2 style="flex:1">Despesas (notas, medições de terceiros, recibos)</h2><button class="btn sm primary" data-act="despNova">${I.plus} Despesa</button></div>
     ${desp ? `<div class="card table-wrap"><table class="data"><thead><tr><th>Data</th><th>Documento</th><th>Fornecedor / descrição</th><th>Categoria / vínculo</th><th class="num">Valor</th><th class="num">Pago</th><th>Situação</th><th></th></tr></thead><tbody>${desp}</tbody></table></div>` : vazioCard('Nenhuma despesa lançada.')}

@@ -147,6 +147,12 @@ a.kpi-link:hover { border-color: var(--accent); }
 .inicio-intro { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
 .passos { margin: 6px 0 0; padding-left: 20px; display: grid; gap: 6px; }
 .filtros-obras { gap: 8px; }
+/* fornecedores */
+table.tabela-clicavel tbody tr[data-act] { cursor: pointer; }
+table.tabela-clicavel tbody tr[data-act]:hover td { background: var(--surface-2); }
+.ficha-campos { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px 16px; }
+.ficha-campos > div > div { word-break: break-word; }
+.chips-check { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 6px; font-weight: 400; }
 main { flex: 1; min-width: 0; padding: 20px 24px 40px; max-width: 1400px; }
 .bottomnav { display: none; }
 

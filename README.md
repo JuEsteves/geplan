@@ -15,7 +15,11 @@ coeficientes de produtividade (h/unid). Fluxo:
    Duração manual tem prioridade. Atividades sem vínculo e sem duração manual (cura, fornecedor, documentação…) usam a **duração padrão do tipo** com alerta, até você preencher.
 5. **Cronograma (CPM)** em dias úteis (feriados da obra + gerais), com folga total e caminho crítico. Prioridade do início: início real > início fixado > predecessoras; fim real substitui o fim calculado. Ciclos são bloqueados. Níveis 1 e 2 agregam as filhas.
 6. **Gantt**, **Curva S** física (ponderada por HH) e financeira (custo alocado distribuído nos dias úteis), **Acompanhamento** (% executado, datas reais, medições) e **exportação** Excel/PDF.
-7. **Importar planilha** – cria uma obra a partir do .xlsx modelo (abas EAP Detalhada, Composicoes, Orcamento, Vinculo_Orc_EAP e Duracao_Atividades).
+7. **Importar planilha** – salva o .xlsx como **modelo de EAP** (abas EAP Detalhada, Composicoes, Orcamento, Vinculo_Orc_EAP e Duracao_Atividades), que pode ser o **modelo inicial (★)**. As composições entram na biblioteca (com fonte, ref. SINAPI, etapa e observação).
+8. **Nova obra a partir do modelo** – escolha as etapas/subetapas que entram. Depois, na aba Atividades, **"+ Fases do modelo"** acrescenta outras fases: elas entram na posição do modelo e as predecessoras são religadas. Se uma fase ficar de fora, a atividade herda as predecessoras dela (em cadeia). Predecessora editada à mão não é alterada.
+10. **Aba Fases** – biblioteca de modelos de EAP independente das obras: criar, renomear, reordenar e excluir etapas/subetapas/atividades, tipo, equipe, duração e predecessoras; marcar uma etapa como alternativa de outra. As obras guardam o vínculo por id (`modeloAtivId`), então editar o modelo não quebra obras existentes.
+11. **Base SINAPI** (Composições › Base SINAPI) – a Caixa não tem API pública; importe a planilha analítica mensal (XLSX do ZIP por UF). A base fica no aparelho (IndexedDB), pesquisável; "Adicionar à biblioteca" cria a composição com as funções de mão de obra (itens em horas) e a líder sugerida. "Duplicar como própria" cria uma composição própria a partir de qualquer outra.
+9. **Variantes de escopo** – etapas com letra (ex.: 11B Piscina de fibra, alternativa à 11). Só uma por etapa entra na obra; predecessoras externas são trocadas automaticamente (17.1.1: 11.9.5 → 11B.9.5).
 
 ### Predecessoras (mesma notação da planilha)
 | Digite | Significado |

@@ -73,6 +73,13 @@ por Excel. Se `docs/` tiver a planilha, testam também a importação do modelo.
   automaticamente (a versão mais recente vence). Use a mesma conta no PC e no celular.
 - O site usa a permissão `drive.file`: ele **só enxerga os arquivos que ele mesmo criou** no seu Drive.
 
+### Modo nuvem (banco de dados — Supabase)
+Com `SUPABASE_URL` e `SUPABASE_ANON_KEY` preenchidos em `js/config.js`, o GEPLAN passa a usar um banco
+PostgreSQL com várias empresas, pessoas, perfis de acesso (administrador, engenheiro, supervisor, financeiro,
+compras, cliente), convites, planos e auditoria — com as permissões verificadas **no banco** (RLS).
+Login por e-mail/senha ou Google. O aparelho guarda uma cópia de trabalho para funcionar sem internet.
+Configuração passo a passo: [`supabase/README.md`](supabase/README.md). Arquitetura e status: [`ARQUITETURA.md`](ARQUITETURA.md).
+
 ---
 
 ## 1) Criar o Client ID do Google (uma vez, ~10 min)
@@ -151,8 +158,11 @@ js/store.js             armazenamento no aparelho
 js/drive.js             login Google e sincronização com o Drive
 js/export.js            exportação Excel/PDF
 js/ui.js, js/libs.js    componentes de tela e bibliotecas externas
-js/config.js            Client ID do Google e contas autorizadas
+js/config.js            Client ID do Google, contas autorizadas e conexão do Supabase (URL + chave pública)
+js/permissoes.js        o que cada perfil pode alterar (só interface; quem decide é o banco)
+js/nuvem/               modo nuvem: mapeamento app ↔ tabelas, sincronização, login, empresa
+supabase/               migrações SQL, planos iniciais, guia de configuração e simulador de testes
 sw.js, manifest.webmanifest, icons/   app instalável e offline
-tests/                  testes automáticos (abrir no navegador)
+tests/                  testes automáticos (index.html: cálculos · db.html: banco/RLS · nuvem.html: app em modo nuvem)
 tools/serve.ps1         servidor local para testes
 ```

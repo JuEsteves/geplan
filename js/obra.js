@@ -3,18 +3,21 @@
 import * as store from './store.js';
 import { calcular, fmtPct, liderDe } from './calculo.js';
 import { cronograma, criaCiclo } from './cpm.js';
-import { curvaS, avanco, fracPlanejada } from './curvaS.js';
+import { curvaS, avanco, fracPlanejada, curvaReal, incorridoAte } from './curvaS.js';
 import { formatNotacao, resolverNotacao } from './predecessoras.js';
-import { filhosDe, renumerar, novaAtividade, novoItem, novaComposicao, TIPOS, DURACAO_PADRAO, uid } from './model.js';
+import { filhosDe, renumerar, novaAtividade, novoItem, novaComposicao, TIPOS, DURACAO_PADRAO, uid, registrar, STATUS_OBRA, PERFIS_DISTRIBUICAO, PESOS_FISICOS } from './model.js';
 import { toDay, fmtBR, isoBR, todayDay, todayISO, fmtNum, fmtNumFix, fmtBRL, dateParts, MESES, weekday, feriadosNacionais } from './schedule.js';
 import { esc, I, ui, toast, formDialog, ask, info, commit, queueRender, parseNum, fmtIn } from './ui.js';
 import { exportExcel, exportPDF } from './export.js';
 import { modeloDaObra, instanciarModelo } from './importador.js';
 import { escolherFases } from './biblioteca.js';
+import { tabPainel, tabMedicoes, tabDiario, tabFinanceiro, usuario } from './gestao.js';
+import { bdiTCU, resumoOrcamento, snapshotOrcamento, compararOrcamento, valorAgregado } from './financeiro.js';
+import { importarOrcamentoExcel } from './orcImport.js';
 
 export const TABS = [
-  ['orcamento', 'Orçamento'], ['vinculos', 'Vínculos'], ['atividades', 'Atividades'], ['gantt', 'Gantt'],
-  ['curva', 'Curva S'], ['acompanhamento', 'Acompanhamento'], ['config', 'Configurações'],
+  ['painel', 'Painel'], ['orcamento', 'Orçamento'], ['vinculos', 'Vínculos'], ['atividades', 'Atividades'], ['gantt', 'Gantt'],
+  ['curva', 'Físico-financeiro'], ['medicoes', 'Medições'], ['diario', 'Diário de obra'], ['financeiro', 'Financeiro'], ['config', 'Cadastro'],
 ];
 
 const natural = (a, b) => String(a).localeCompare(String(b), 'pt-BR', { numeric: true });
@@ -83,8 +86,9 @@ export function viewObra(route) {
   const o = store.obra(route.id);
   if (!o) return `<div class="card empty"><p>Obra não encontrada.</p><a class="btn" href="#/obras">Voltar</a></div>`;
   const c = contexto(o);
-  const tab = TABS.some(([k]) => k === route.tab) ? route.tab : 'atividades';
-  const body = { orcamento: tabOrcamento, vinculos: tabVinculos, atividades: tabAtividades, gantt: tabGantt, curva: tabCurva, acompanhamento: tabAcompanhamento, config: tabConfig }[tab](c);
+  const pedida = route.tab === 'acompanhamento' ? 'medicoes' : route.tab;
+  const tab = TABS.some(([k]) => k === pedida) ? pedida : 'painel';
+  const body = { painel: tabPainel, orcamento: tabOrcamento, vinculos: tabVinculos, atividades: tabAtividades, gantt: tabGantt, curva: tabCurva, medicoes: tabMedicoes, diario: tabDiario, financeiro: tabFinanceiro, config: tabConfig }[tab](c);
   const temEAP = o.eap.length > 0;
   const alertas = c.calc.alertasItens + c.calc.alertasAtiv;
   return `<div class="page-head" style="margin-bottom:10px"><div>
@@ -93,7 +97,7 @@ export function viewObra(route) {
       <div class="row small muted">
         <span>Início <b class="ink">${fmtBR(c.cron.inicio)}</b></span>·
         <span>Término <b class="ink">${temEAP ? fmtBR(c.cron.termino) : '—'}</b></span>·
-        <span><b class="ink">${c.cron.durTotal}</b> dias úteis</span>·
+        <span><b class="ink">${c.cron.durTotal}</b> ${c.cron.unidDias}</span>·
         <span><b class="ink">${fmtNum(c.calc.totalHH, 0)}</b> HH</span>·
         <span><b class="ink">${fmtBRL(c.calc.totalOrcamento)}</b></span>
         ${alertas ? `· <a href="#/obra/${o.id}/atividades" data-act="verAlertas" class="badge warn" style="text-decoration:none">${I.alert} ${alertas} alerta${alertas > 1 ? 's' : ''}</a>` : ''}
@@ -121,9 +125,11 @@ function badgeItem(I_) {
 
 function tabOrcamento(c) {
   const { o, calc, lib } = c;
+  const res = resumoOrcamento(o, calc);
+  const fatorBDI = isFinite(res.bdi) ? 1 + res.bdi : 1;
   const f = ui.orcFilter.trim().toLowerCase();
   const itens = [...o.orcamento].sort((a, b) => natural(a.codigo, b.codigo))
-    .filter((it) => !f || `${it.codigo} ${it.etapa} ${it.subetapa} ${calc.itens.get(it.id).comp?.descricao || ''}`.toLowerCase().includes(f));
+    .filter((it) => !f || `${it.codigo} ${it.etapa} ${it.subetapa} ${calc.itens.get(it.id).comp?.descricao || it.descricao || ''}`.toLowerCase().includes(f));
   const grupos = new Map();
   for (const it of itens) {
     const k = it.etapa || '(sem etapa)';
@@ -135,20 +141,25 @@ function tabOrcamento(c) {
   let rows = '';
   for (const [etapa, subs] of grupos) {
     const totE = [...subs.values()].flat().reduce((s, it) => s + calc.itens.get(it.id).total, 0);
-    rows += `<tr class="lvl1"><td colspan="6">${esc(etapa)}</td><td class="num">${fmtBRL(totE)}</td><td colspan="2"></td></tr>`;
+    rows += `<tr class="lvl1"><td colspan="6">${esc(etapa)}</td><td class="num">${fmtBRL(totE)}</td><td class="num">${fmtBRL(totE * fatorBDI)}</td><td colspan="2"></td></tr>`;
     for (const [sub, lista] of subs) {
-      if (sub) rows += `<tr class="lvl2"><td></td><td colspan="8">${esc(sub)}</td></tr>`;
+      if (sub) {
+        const totS = lista.reduce((s, it) => s + calc.itens.get(it.id).total, 0);
+        rows += `<tr class="lvl2"><td></td><td colspan="5">${esc(sub)}</td><td class="num">${fmtBRL(totS)}</td><td colspan="3"></td></tr>`;
+      }
       for (const it of lista) {
         const X = calc.itens.get(it.id);
         rows += `<tr>
           <td><input class="cell w-code" data-chg="itemField" data-f="codigo" data-id="${it.id}" data-key="ic:${it.id}" value="${esc(it.codigo)}"></td>
           <td style="min-width:260px"><select class="cell" data-chg="itemComp" data-id="${it.id}" data-key="icomp:${it.id}">${compOptions(lib, it.composicaoId)}</select>
-            ${X.comp && X.lider ? `<div class="muted small">líder: ${esc(X.lider.funcao)} · ${fmtNum(X.lider.coef, 4)} h/${esc(X.comp.unidade)}</div>` : ''}</td>
-          <td>${esc(X.comp?.unidade || '')}</td>
+            ${X.comp && X.lider ? `<div class="muted small">líder: ${esc(X.lider.funcao)} · ${fmtNum(X.lider.coef, 4)} h/${esc(X.comp.unidade)}</div>`
+              : `<input class="cell" data-chg="itemField" data-f="descricao" data-id="${it.id}" data-key="idesc:${it.id}" value="${esc(it.descricao || '')}" placeholder="Descrição do serviço (sem composição)">`}</td>
+          <td>${X.comp ? esc(X.comp.unidade) : `<input class="cell w-un" list="unidades" data-chg="itemField" data-f="unidade" data-id="${it.id}" value="${esc(it.unidade || '')}" placeholder="un">`}</td>
           <td><input class="cell w-num" inputmode="decimal" data-chg="itemField" data-f="quantidade" data-id="${it.id}" data-key="iq:${it.id}" value="${fmtIn(it.quantidade, 4)}"></td>
           <td><input class="cell w-num" inputmode="decimal" data-chg="itemField" data-f="custoUnit" data-id="${it.id}" data-key="iu:${it.id}" value="${fmtIn(it.custoUnit, 2)}"></td>
           <td class="num">${fmtNum(X.vinculos.reduce((s, r) => s + r.hh, 0), 1)}</td>
           <td class="num nowrap">${fmtBRL(X.total)}</td>
+          <td class="num nowrap muted">${fmtBRL(X.total * fatorBDI)}</td>
           <td><a href="#/obra/${o.id}/vinculos" data-act="irVinculo" data-id="${it.id}" style="text-decoration:none">${badgeItem(X)}</a></td>
           <td class="nowrap"><button class="icon-btn" title="Editar etapa/subetapa" data-act="itemEditar" data-id="${it.id}">${I.more}</button><button class="icon-btn danger" title="Excluir item" data-act="itemExcluir" data-id="${it.id}">${I.trash}</button></td>
         </tr>`;
@@ -156,19 +167,29 @@ function tabOrcamento(c) {
     }
   }
   const pend = [...calc.itens.values()].filter((x) => x.status !== 'OK').length;
+  const revs = o.revisoesOrcamento || [];
   return `<div class="stack">
+    <div class="kpis">
+      <div class="card kpi"><div class="k-label">Custo direto (execução)</div><div class="k-value" style="font-size:20px">${fmtBRL(res.custoDireto)}</div><div class="k-sub">${o.orcamento.length} itens · ${fmtNum(calc.totalHH, 0)} HH</div></div>
+      <div class="card kpi"><div class="k-label">BDI</div><div class="k-value">${isFinite(res.bdi) ? fmtNum(res.bdi * 100, 2) + '%' : 'inválido'}</div><div class="k-sub"><a href="#" data-act="bdiConfig">configurar</a> · fórmula TCU</div></div>
+      <div class="card kpi"><div class="k-label">Preço de venda</div><div class="k-value" style="font-size:20px">${fmtBRL(res.precoVenda)}</div><div class="k-sub">custo direto × (1 + BDI)</div></div>
+      <div class="card kpi"><div class="k-label">Revisões salvas</div><div class="k-value">${revs.length}</div><div class="k-sub">${revs[0] ? `última: ${esc(revs[0].nome)}` : 'nenhuma'}</div></div>
+    </div>
     <div class="row">
       <input data-inp="orcFilter" data-key="orcFilter" value="${esc(ui.orcFilter)}" placeholder="Buscar item, etapa ou composição…" style="flex:1;min-width:200px">
       <button class="btn primary" data-act="itemNovo">${I.plus} Item</button>
+      <button class="btn" data-act="orcImportar">${I.upload} Importar Excel</button>
+      <button class="btn" data-act="orcRevisao">Salvar revisão</button>
+      ${revs.length ? '<button class="btn" data-act="orcComparar">Comparar revisões</button>' : ''}
       <button class="btn" data-act="exportXlsx">Exportar Excel</button>
     </div>
     ${pend ? `<div class="alert err">${pend} ite${pend > 1 ? 'ns' : 'm'} do orçamento com vínculo diferente de 100% — veja a aba <a href="#/obra/${o.id}/vinculos">Vínculos</a>.</div>` : ''}
     ${o.orcamento.length ? `<div class="card table-wrap"><table class="data">
-      <thead><tr><th>Item</th><th>Composição</th><th>Un.</th><th class="num">Quantidade</th><th class="num">Custo unit. (R$)</th><th class="num">HH</th><th class="num">Total</th><th>Vínculo EAP</th><th></th></tr></thead>
+      <thead><tr><th>Item</th><th>Composição / serviço</th><th>Un.</th><th class="num">Quantidade</th><th class="num">Custo unit. (R$)</th><th class="num">HH</th><th class="num">Custo total</th><th class="num">Preço venda</th><th>Vínculo EAP</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
-      <tfoot><tr><td colspan="5"><b>Total do orçamento</b></td><td class="num"><b>${fmtNum(calc.totalHH, 1)}</b></td><td class="num nowrap"><b>${fmtBRL(calc.totalOrcamento)}</b></td><td colspan="2" class="small muted">alocado na EAP: ${fmtBRL(calc.totalAlocado)}</td></tr></tfoot>
-    </table></div>` : `<div class="card empty"><p>Nenhum item no orçamento.</p><button class="btn primary" data-act="itemNovo">${I.plus} Adicionar item</button></div>`}
-    <div class="muted small">HH = quantidade × coeficiente da função líder da composição. Total = quantidade × custo unitário. Cada item precisa ser distribuído 100% entre as atividades da EAP (aba Vínculos).</div>
+      <tfoot><tr><td colspan="5"><b>Total do orçamento</b></td><td class="num"><b>${fmtNum(calc.totalHH, 1)}</b></td><td class="num nowrap"><b>${fmtBRL(calc.totalOrcamento)}</b></td><td class="num nowrap"><b>${fmtBRL(res.precoVenda)}</b></td><td colspan="2" class="small muted">alocado na EAP: ${fmtBRL(calc.totalAlocado)}</td></tr></tfoot>
+    </table></div>` : `<div class="card empty"><p>Nenhum item no orçamento.</p><div class="row" style="justify-content:center"><button class="btn primary" data-act="itemNovo">${I.plus} Adicionar item</button><button class="btn" data-act="orcImportar">${I.upload} Importar Excel</button></div></div>`}
+    <div class="muted small"><b>Custo total</b> = quantidade × custo unitário (custo direto; os encargos sociais já estão no custo das composições). <b>Preço de venda</b> = custo × (1 + BDI), aplicado uma única vez. HH = quantidade × coeficiente da função líder. Cada item precisa ser distribuído 100% entre as atividades (aba Vínculos). Antes de importar ou fazer mudanças grandes, use "Salvar revisão" para poder comparar depois.</div>
   </div>`;
 }
 
@@ -279,7 +300,7 @@ function tabAtividades(c) {
     <div class="kpis">
       <div class="card kpi"><div class="k-label">Início</div><div class="k-value">${fmtBR(cron.inicio)}</div></div>
       <div class="card kpi"><div class="k-label">Término previsto</div><div class="k-value">${o.eap.length ? fmtBR(cron.termino) : '—'}</div></div>
-      <div class="card kpi"><div class="k-label">Prazo</div><div class="k-value">${cron.durTotal}</div><div class="k-sub">dias úteis</div></div>
+      <div class="card kpi"><div class="k-label">Prazo</div><div class="k-value">${cron.durTotal}</div><div class="k-sub">${cron.unidDias}</div></div>
       <div class="card kpi"><div class="k-label">Caminho crítico</div><div class="k-value">${criticas}</div><div class="k-sub">atividades sem folga</div></div>
       <div class="card kpi"><div class="k-label">Alertas</div><div class="k-value" style="color:${nAl ? 'var(--warn)' : 'inherit'}">${nAl}</div><div class="k-sub">atividades</div></div>
     </div>
@@ -412,32 +433,42 @@ function tabGantt(c) {
    ===================================================================== */
 function tabCurva(c) {
   const { o, calc, cron } = c;
-  if (!o.eap.length) return `<div class="card empty"><p>Monte a EAP e o orçamento para gerar a Curva S.</p></div>`;
-  const cs = curvaS(calc, cron, ui.curvaPeriodo);
-  const hoje = avanco(o, calc, cron, todayDay());
-  const rows = cs.periodos.map((p) => `<tr><td class="nowrap">${p.label}</td><td class="num">${fmtNumFix(p.fisPer, 1)}%</td><td class="num">${fmtNumFix(p.fisAc, 1)}%</td><td class="num nowrap">${fmtBRL(p.finPer)}</td><td class="num nowrap">${fmtBRL(p.finAc)}</td></tr>`).join('');
+  if (!o.eap.length) return `<div class="card empty"><p>Monte a EAP e vincule o orçamento para gerar o cronograma físico-financeiro.</p></div>`;
+  ui.curvaRef ||= todayISO();
+  const ref = toDay(ui.curvaRef) ?? todayDay();
+  const cs = curvaS(calc, cron, ui.curvaPeriodo, o);
+  const real = curvaReal(o, calc, cron, cs.periodos, ref);
+  const av = avanco(o, calc, cron, ref);
+  const rows = cs.periodos.map((p, i) => {
+    const r = real[i];
+    return `<tr${p.ini <= ref && ref <= p.fim ? ' class="lvl2"' : ''}><td class="nowrap">${p.label}</td>
+      <td class="num">${fmtNumFix(p.fisPer, 1)}%</td><td class="num">${fmtNumFix(p.fisAc, 1)}%</td><td class="num">${r ? fmtNumFix(r.fis, 1) + '%' : ''}</td><td class="num">${r ? `${r.fis - p.fisAc >= 0 ? '+' : ''}${fmtNumFix(r.fis - p.fisAc, 1)}` : ''}</td>
+      <td class="num nowrap">${fmtBRL(p.finPer)}</td><td class="num nowrap">${fmtBRL(p.finAc)}</td><td class="num nowrap">${r ? fmtBRL(r.fin) : ''}</td></tr>`;
+  }).join('');
+  const sel = (chg, atual, opcoes) => `<select data-chg="${chg}">${Object.entries(opcoes).map(([k, l]) => `<option value="${k}" ${k === atual ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
   return `<div class="stack">
-    <div class="row">
-      <div class="seg">${[['semana', 'Semana'], ['mes', 'Mês']].map(([k, l]) => `<button data-act="curvaPer" data-p="${k}" class="${ui.curvaPeriodo === k ? 'on' : ''}">${l}</button>`).join('')}</div>
-      <span class="muted small">Física ponderada por ${cs.pesoHH ? 'HH' : 'duração (sem HH no orçamento)'} · financeira pelo custo alocado nas atividades, distribuído igualmente nos dias úteis.</span>
+    <div class="card card-pad row">
+      <label class="field" style="max-width:180px">Data de referência<input type="date" data-chg="curvaRef" value="${ui.curvaRef}"></label>
+      <label class="field">Período<div class="seg">${[['dia', 'Dia'], ['semana', 'Semana'], ['mes', 'Mês']].map(([k, l]) => `<button data-act="curvaPer" data-p="${k}" class="${ui.curvaPeriodo === k ? 'on' : ''}">${l}</button>`).join('')}</div></label>
+      <label class="field" style="max-width:240px">Distribuição padrão dos valores${sel('obraDistrib', o.distribuicaoPadrao || 'linear', PERFIS_DISTRIBUICAO)}</label>
+      <label class="field" style="max-width:240px">Peso físico das atividades${sel('obraPeso', o.pesoFisico || 'hh', PESOS_FISICOS)}</label>
     </div>
     <div class="kpis">
-      <div class="card kpi"><div class="k-label">Total de HH</div><div class="k-value">${fmtNum(cs.totalHH, 0)}</div></div>
-      <div class="card kpi"><div class="k-label">Custo alocado</div><div class="k-value" style="font-size:20px">${fmtBRL(cs.totalCusto)}</div></div>
-      <div class="card kpi"><div class="k-label">Físico hoje (plan. / real)</div><div class="k-value">${fmtNum(hoje.fisicoPlan, 1)}% <span class="muted" style="font-size:16px">/ ${fmtNum(hoje.fisicoReal, 1)}%</span></div></div>
-      <div class="card kpi"><div class="k-label">Financeiro hoje (plan. / real)</div><div class="k-value" style="font-size:18px">${fmtBRL(hoje.finPlan)}</div><div class="k-sub">real ${fmtBRL(hoje.finReal)}</div></div>
+      <div class="card kpi"><div class="k-label">Custo planejado distribuído</div><div class="k-value" style="font-size:20px">${fmtBRL(cs.totalCusto)}</div><div class="k-sub">= custo alocado às atividades</div></div>
+      <div class="card kpi"><div class="k-label">Físico na data (plan. / real)</div><div class="k-value">${fmtNum(av.fisicoPlan, 1)}% <span class="muted" style="font-size:16px">/ ${fmtNum(av.fisicoReal, 1)}%</span></div>${av.semPeso ? '<div class="k-sub" style="color:var(--warn)">nenhuma atividade tem peso pelo critério escolhido</div>' : ''}</div>
+      <div class="card kpi"><div class="k-label">Financeiro na data (plan. / real)</div><div class="k-value" style="font-size:18px">${fmtBRL(av.finPlan)}</div><div class="k-sub">realizado ${fmtBRL(av.finReal)}</div></div>
+      <div class="card kpi"><div class="k-label">Valor agregado (EV)</div><div class="k-value" style="font-size:18px">${fmtBRL(av.valorAgregado)}</div><div class="k-sub">custo × % executado</div></div>
     </div>
     <div class="card card-pad"><div class="row between" style="margin-bottom:8px"><h2>Curva S física (% acumulado)</h2>
       <div class="legend"><span><i style="background:var(--series-plan);height:2px"></i>Planejado</span><span><i style="background:var(--series-real);height:2px"></i>Real (medições)</span></div></div>
       <div class="chart-wrap" id="curvaFis"></div></div>
     <div class="card card-pad"><div class="row between" style="margin-bottom:8px"><h2>Curva S financeira (R$ acumulado)</h2>
-      <div class="legend"><span><i style="background:var(--series-plan);height:2px"></i>Planejado</span><span><i style="background:var(--series-real);height:2px"></i>Real (medições)</span></div></div>
+      <div class="legend"><span><i style="background:var(--series-plan);height:2px"></i>Planejado</span><span><i style="background:var(--series-real);height:2px"></i>Realizado (despesas)</span></div></div>
       <div class="chart-wrap" id="curvaFin"></div></div>
-    <div class="card table-wrap"><table class="data"><thead><tr><th>Período</th><th class="num">Físico no período</th><th class="num">Físico acumulado</th><th class="num">Financeiro no período</th><th class="num">Financeiro acumulado</th></tr></thead><tbody>${rows}</tbody></table></div>
-    <div class="muted small">A curva real é formada pelas medições registradas na aba Acompanhamento.</div>
+    <div class="card table-wrap"><table class="data"><thead><tr><th>Período</th><th class="num">Físico no período</th><th class="num">Físico plan. acum.</th><th class="num">Físico real acum.</th><th class="num">Desvio (pts)</th><th class="num">Financeiro no período</th><th class="num">Financeiro plan. acum.</th><th class="num">Realizado acum.</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="muted small"><b>Definições.</b> Financeiro planejado: custo alocado a cada atividade (vínculos do orçamento), distribuído nos dias úteis dela segundo o perfil (padrão da obra ou o escolhido na atividade, menu ⋯), em centavos — a soma bate com o total. Financeiro realizado: despesas lançadas (aba Financeiro) até cada data. Físico: média do % medido das atividades, ponderada pelo peso escolhido. <b>Gastar 50% do orçamento não significa 50% de obra executada</b> — por isso as duas curvas são separadas.</div>
   </div>`;
 }
-
 const compactBRL = (v) => v >= 1e6 ? `R$ ${fmtNum(v / 1e6, 1)} mi` : v >= 1e3 ? `R$ ${fmtNum(v / 1e3, 0)} mil` : fmtBRL(v);
 
 function desenharCurva(el, plan, real, { max, fmtY, ticks }) {
@@ -474,19 +505,19 @@ function desenharCurva(el, plan, real, { max, fmtY, ticks }) {
 
 export function desenharCurvas(o) {
   const c = contexto(o);
-  const cs = curvaS(c.calc, c.cron, ui.curvaPeriodo);
+  const cs = curvaS(c.calc, c.cron, ui.curvaPeriodo, o);
   if (!cs.periodos.length) return;
+  const ref = toDay(ui.curvaRef || todayISO()) ?? todayDay();
   const ini = cs.periodos[0].ini - 1;
-  const med = [...(o.medicoes || [])].sort((a, b) => a.data.localeCompare(b.data));
+  const real = curvaReal(o, c.calc, c.cron, cs.periodos, ref);
   const fis = [{ day: ini, v: 0 }, ...cs.periodos.map((p) => ({ day: p.fim, v: p.fisAc }))];
   const fin = [{ day: ini, v: 0 }, ...cs.periodos.map((p) => ({ day: p.fim, v: p.finAc }))];
-  const rf = med.length ? [{ day: ini, v: 0 }, ...med.map((m) => ({ day: toDay(m.data), v: Number(m.fisico) || 0 }))] : [];
-  const rfin = med.filter((m) => m.financeiro != null).length ? [{ day: ini, v: 0 }, ...med.filter((m) => m.financeiro != null).map((m) => ({ day: toDay(m.data), v: m.financeiro }))] : [];
+  const rf = real.length ? [{ day: ini, v: 0 }, ...real.map((r) => ({ day: r.day, v: r.fis }))] : [];
+  const rfin = real.length ? [{ day: ini, v: 0 }, ...real.map((r) => ({ day: r.day, v: r.fin }))] : [];
   desenharCurva(document.getElementById('curvaFis'), fis, rf, { max: 100, ticks: [0, 25, 50, 75, 100], fmtY: (v, full) => `${fmtNum(v, full ? 1 : 0)}%` });
   const maxF = Math.max(cs.totalCusto, ...rfin.map((p) => p.v)) || 1;
   desenharCurva(document.getElementById('curvaFin'), fin, rfin, { max: maxF, ticks: [0, maxF / 4, maxF / 2, (3 * maxF) / 4, maxF], fmtY: (v, full) => (full ? fmtBRL(v) : compactBRL(v)) });
 }
-
 /* =====================================================================
    ACOMPANHAMENTO
    ===================================================================== */
@@ -566,17 +597,40 @@ function tabConfig(c) {
   const lista = (arr, act) => arr.length ? [...arr].sort((a, b) => a.data.localeCompare(b.data)).map((f) => `<div class="list-item"><span style="flex:1"><b>${isoBR(f.data)}</b> <span class="muted">${['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'][weekday(toDay(f.data))]}</span> · ${esc(f.desc || '')}</span><button class="icon-btn danger" data-act="${act}" data-d="${f.data}" title="Remover">${I.trash}</button></div>`).join('') : '<div class="muted small">Nenhum.</div>';
   const pad = { ...DURACAO_PADRAO, ...(o.duracaoPadrao || {}) };
   return `<div class="stack" style="max-width:860px">
-    <div class="card card-pad stack"><h2>Dados da obra</h2>
+    <div class="card card-pad stack"><h2>Identificação</h2>
       <div class="grid-form">
         <label class="field">Nome da obra<input data-chg="obraField" data-f="nome" value="${esc(o.nome)}"></label>
-        <label class="field">Data de início<input type="date" data-chg="obraField" data-f="inicio" value="${o.inicio}"></label>
+        <label class="field">Código<input data-chg="obraTexto" data-f="codigo" value="${esc(o.codigo || '')}" placeholder="ex.: OB-023"></label>
+        <label class="field">Status<select data-chg="obraTexto" data-f="status">${STATUS_OBRA.map((s) => `<option ${s === o.status ? 'selected' : ''}>${s}</option>`).join('')}</select></label>
+        <label class="field">Tipo de empreendimento<input data-chg="obraTexto" data-f="tipoEmpreendimento" value="${esc(o.tipoEmpreendimento || '')}" list="dl-tipos"><datalist id="dl-tipos"><option value="Residencial unifamiliar"><option value="Residencial multifamiliar"><option value="Comercial"><option value="Reforma"><option value="Industrial"></datalist></label>
+        <label class="field">Endereço<input data-chg="obraTexto" data-f="endereco" value="${esc(o.endereco || '')}"></label>
+        <label class="field">Cidade / UF<input data-chg="obraTexto" data-f="cidade" value="${esc(o.cidade || '')}"></label>
+        <label class="field">Engenheiro responsável<input data-chg="obraTexto" data-f="engenheiro" value="${esc(o.engenheiro || '')}"></label>
+        <label class="field">CREA/CAU<input data-chg="obraTexto" data-f="crea" value="${esc(o.crea || '')}"></label>
+      </div></div>
+    <div class="card card-pad stack"><h2>Cliente</h2>
+      <div class="grid-form">
+        <label class="field">Nome<input data-chg="obraCliente" data-f="nome" value="${esc(o.cliente?.nome || '')}"></label>
+        <label class="field">Contato<input data-chg="obraCliente" data-f="contato" value="${esc(o.cliente?.contato || '')}"></label>
+        <label class="field">Telefone<input type="tel" data-chg="obraCliente" data-f="telefone" value="${esc(o.cliente?.telefone || '')}"></label>
+        <label class="field">E-mail<input type="email" data-chg="obraCliente" data-f="email" value="${esc(o.cliente?.email || '')}"></label>
+      </div></div>
+    <div class="card card-pad stack"><h2>Prazos e valores</h2>
+      <div class="grid-form">
+        <label class="field">Início planejado<input type="date" data-chg="obraField" data-f="inicio" value="${o.inicio}"><span class="muted small" style="font-weight:400">base do cronograma</span></label>
+        <label class="field">Término planejado (contratual)<input type="date" data-chg="obraTexto" data-f="terminoPlanejado" value="${o.terminoPlanejado || ''}"></label>
+        <label class="field">Início real<input type="date" data-chg="obraTexto" data-f="inicioReal" value="${o.inicioReal || ''}"></label>
+        <label class="field">Previsão atual de término<input disabled value="${o.eap.length ? fmtBR(cron.termino) : '—'}"><span class="muted small" style="font-weight:400">calculada pelo cronograma</span></label>
+        <label class="field">Valor contratado (R$)<input inputmode="decimal" data-chg="obraValor" value="${o.valorContratado != null ? fmtIn(o.valorContratado, 2) : ''}"></label>
         <label class="field">Jornada (h por dia útil)<input inputmode="decimal" data-chg="obraField" data-f="jornada" value="${fmtIn(o.jornada, 2)}"></label>
         <label class="field">Eficiência (0 a 1)<input inputmode="decimal" data-chg="obraField" data-f="eficiencia" value="${fmtIn(o.eficiencia, 3)}"><span class="muted small" style="font-weight:400">perdas, clima, deslocamentos (0,85 = 85%)</span></label>
       </div></div>
     <div class="card card-pad stack"><h2>Duração padrão por tipo (dias úteis)</h2>
       <p class="muted small" style="margin:0">Usada provisoriamente em atividades sem vínculo com o orçamento e sem duração manual. Elas aparecem com alerta até você definir a duração.</p>
       <div class="grid-form">${TIPOS.map((t) => `<label class="field">${t}<input inputmode="numeric" data-chg="durPadrao" data-t="${t}" value="${pad[t]}"></label>`).join('')}</div></div>
-    <div class="card card-pad stack"><h2>Dias úteis</h2>
+    <div class="card card-pad stack"><h2>Calendário</h2>
+      <div class="seg" style="align-self:flex-start"><button data-act="calTipo" data-t="uteis" class="${o.calendario.tipo !== 'corridos' ? 'on' : ''}">Dias úteis</button><button data-act="calTipo" data-t="corridos" class="${o.calendario.tipo === 'corridos' ? 'on' : ''}">Dias corridos</button></div>
+      <p class="muted small" style="margin:0">${o.calendario.tipo === 'corridos' ? 'Todos os dias contam no prazo (sem fins de semana nem feriados).' : 'Marque os dias trabalhados; feriados abaixo são pulados.'}</p>
       <div class="dias">${dn.map((d, i) => `<label><input type="checkbox" data-chg="calDia" data-d="${i}" ${(o.calendario.dias || []).includes(i) ? 'checked' : ''}>${d}</label>`).join('')}</div></div>
     <div class="card card-pad stack">
       <div class="row between"><h2>Feriados desta obra</h2>
@@ -586,6 +640,9 @@ function tabConfig(c) {
     <div class="card card-pad stack"><h2>Feriados gerais (todas as obras)</h2>
       <div class="row"><input type="date" id="ferGData" style="width:auto"><input id="ferGDesc" placeholder="Descrição" style="flex:1;min-width:160px" data-enter="addFeriadoGeral"><button class="btn" data-act="addFeriadoGeral">${I.plus} Adicionar</button></div>
       <div class="hol-list">${lista(lib.feriadosGlobais || [], 'delFeriadoGeral')}</div></div>
+    <div class="card card-pad stack"><h2>Histórico de alterações</h2>
+      ${(o.historico || []).length ? `<div class="table-wrap" style="max-height:320px;overflow:auto"><table class="data"><thead><tr><th>Quando</th><th>Ação</th><th>Detalhe</th><th>Usuário</th></tr></thead><tbody>${o.historico.slice(0, 100).map((h) => `<tr><td class="nowrap small">${new Date(h.em).toLocaleString('pt-BR')}</td><td>${esc(h.acao)}</td><td class="small">${esc(h.detalhe || '')}</td><td class="small muted">${esc(h.usuario || '')}</td></tr>`).join('')}</tbody></table></div>` : '<div class="muted small">As alterações importantes (orçamento, linha de base, medições, despesas, dados da obra) aparecem aqui.</div>'}
+    </div>
     <div class="card card-pad row">
       <button class="btn" data-act="salvarModelo">Salvar EAP como modelo</button>
       <button class="btn" data-act="dupObra">${I.copy} Duplicar obra</button>
@@ -635,7 +692,12 @@ async function menuAtividade(o, a) {
       ${temF ? '' : `<div class="grid-form">
         <label class="field">Início fixado<input type="date" name="inicioFixado" value="${a.inicioFixado || ''}"><span class="muted small" style="font-weight:400">trava a data (ex.: concreteira agendada)</span></label>
         <label class="field">Início real<input type="date" name="inicioReal" value="${a.inicioReal || ''}"></label>
-        <label class="field">Fim real<input type="date" name="fimReal" value="${a.fimReal || ''}"></label></div>`}
+        <label class="field">Fim real<input type="date" name="fimReal" value="${a.fimReal || ''}"></label>
+        <label class="field">Responsável<input name="responsavel" value="${esc(a.responsavel || '')}"></label>
+        <label class="field">Equipe executora<input name="equipeExecutora" value="${esc(a.equipeExecutora || '')}" placeholder="ex.: Empreiteira X"></label>
+        <label class="field">Distribuição do custo no tempo<select name="perfil"><option value="">Padrão da obra (${esc(PERFIS_DISTRIBUICAO[o.distribuicaoPadrao || 'linear'])})</option>${Object.entries(PERFIS_DISTRIBUICAO).map(([k, l]) => `<option value="${k}" ${a.perfil === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        <label class="field">Medição<select name="medicao"><option value="">Automática (quantidade se houver vínculo)</option><option value="quantidade" ${a.medicao === 'quantidade' ? 'selected' : ''}>Por quantidade</option><option value="percentual" ${a.medicao === 'percentual' ? 'selected' : ''}>Por percentual</option></select></label>
+        ${o.pesoFisico === 'manual' ? `<label class="field">Peso físico (manual)<input name="pesoManual" inputmode="decimal" value="${a.pesoManual != null ? fmtIn(a.pesoManual, 4) : ''}"></label>` : ''}</div>`}
       <label class="field">Observação<textarea name="obs" rows="2">${esc(a.obs || '')}</textarea></label>
       <div class="row wrap-btns">
         <button type="button" class="btn sm" data-r="filho">${I.plus} Subatividade</button>
@@ -658,7 +720,13 @@ async function menuAtividade(o, a) {
   if (!r) return;
   const salvarCampos = () => {
     a.obs = r.vals.obs ?? a.obs;
-    if (!temF) { a.inicioFixado = r.vals.inicioFixado || ''; a.inicioReal = r.vals.inicioReal || ''; a.fimReal = r.vals.fimReal || ''; if (a.fimReal) a.pct = 100; }
+    if (!temF) {
+      a.inicioFixado = r.vals.inicioFixado || ''; a.inicioReal = r.vals.inicioReal || ''; a.fimReal = r.vals.fimReal || '';
+      if (a.fimReal && !(o.medicoesAtiv || []).some((m) => m.atividadeId === a.id)) a.pct = 100;
+      a.responsavel = (r.vals.responsavel || '').trim(); a.equipeExecutora = (r.vals.equipeExecutora || '').trim();
+      a.perfil = r.vals.perfil || ''; a.medicao = r.vals.medicao || '';
+      if ('pesoManual' in r.vals) a.pesoManual = parseNum(r.vals.pesoManual);
+    }
   };
   salvarCampos();
   const irmaos = o.eap.filter((x) => (x.parentId || null) === (a.parentId || null));
@@ -810,15 +878,50 @@ export const acoesObra = {
     commit(o);
   },
   atvMenu(d) { const o = obraAtual(); menuAtividade(o, ativ(o, d.id)); },
+  async bdiConfig() {
+    const o = obraAtual(); const b = o.bdi || {};
+    const campo = (n, l) => ({ name: n, label: `${l} (%)`, value: fmtIn(b[n] || 0, 2), placeholder: '0' });
+    const v = await formDialog({ title: 'BDI — fórmula do TCU', ok: 'Salvar', text: 'BDI = [(1+AC+S+R+G)×(1+DF)×(1+L)] ÷ (1−I) − 1. Informe em %. O BDI é aplicado uma vez sobre o custo direto.', fields: [
+      campo('ac', 'Administração central (AC)'), campo('s', 'Seguros (S)'), campo('r', 'Riscos (R)'), campo('g', 'Garantias (G)'), campo('df', 'Despesas financeiras (DF)'), campo('l', 'Lucro (L)'), campo('i', 'Tributos sobre o faturamento (I)'),
+    ] });
+    if (!v) return;
+    const nb = Object.fromEntries(Object.entries(v).map(([k, x]) => [k, parseNum(x) || 0]));
+    if (!isFinite(bdiTCU(nb))) return toast('Tributos (I) precisam ser menores que 100%.');
+    o.bdi = nb; registrar(o, 'BDI alterado', `${fmtNum(bdiTCU(nb) * 100, 2)}%`, usuario()); commit(o);
+  },
+  async orcRevisao() {
+    const o = obraAtual();
+    const v = await formDialog({ title: 'Salvar revisão do orçamento', ok: 'Salvar', fields: [{ name: 'nome', label: 'Nome da revisão', required: true, value: `R${(o.revisoesOrcamento || []).length}` }] });
+    if (!v) return;
+    const s = snapshotOrcamento(o, store.lib(), v.nome.trim());
+    o.revisoesOrcamento.unshift(s); registrar(o, 'Revisão do orçamento salva', `${s.nome} — ${fmtBRL(s.custoTotal)}`, usuario()); commit(o);
+    toast('Revisão salva.');
+  },
+  async orcComparar() {
+    const o = obraAtual(); const revs = o.revisoesOrcamento || [];
+    const v = await formDialog({ title: 'Comparar revisões', ok: 'Comparar', fields: [{ name: 'r', label: 'Comparar o orçamento atual com', type: 'select', value: revs[0].id, options: revs.map((r) => ({ value: r.id, label: `${r.nome} (${r.data.slice(0, 10).split('-').reverse().join('/')})` })) }] });
+    if (!v) return;
+    const d = compararOrcamento(revs.find((r) => r.id === v.r), snapshotOrcamento(o, store.lib(), 'atual'));
+    const linha = (i) => `${esc(i.codigo)} ${esc(i.descricao)} — ${fmtNum(i.quantidade, 2)} × ${fmtBRL(i.custoUnit)}`;
+    info('Comparação de revisões', `<p style="margin-top:0">Diferença no custo total: <b>${fmtBRL(d.delta)}</b></p>
+      <p><b>Alterados (${d.alterados.length})</b></p><ul class="small">${d.alterados.map((x) => `<li>${esc(x.depois.codigo)} ${esc(x.depois.descricao)}: ${fmtNum(x.antes.quantidade, 2)} × ${fmtBRL(x.antes.custoUnit)} → ${fmtNum(x.depois.quantidade, 2)} × ${fmtBRL(x.depois.custoUnit)} (${fmtBRL(x.delta)})</li>`).join('') || '<li>nenhum</li>'}</ul>
+      <p><b>Incluídos (${d.incluidos.length})</b></p><ul class="small">${d.incluidos.map((i) => `<li>${linha(i)}</li>`).join('') || '<li>nenhum</li>'}</ul>
+      <p><b>Removidos (${d.removidos.length})</b></p><ul class="small">${d.removidos.map((i) => `<li>${linha(i)}</li>`).join('') || '<li>nenhum</li>'}</ul>`);
+  },
+  orcImportar() { importarOrcamentoExcel(obraAtual()); },
+  calTipo(d) { const o = obraAtual(); o.calendario.tipo = d.t; registrar(o, 'Calendário alterado', d.t === 'corridos' ? 'dias corridos' : 'dias úteis', usuario()); commit(o); },
   async saveBase() {
     const o = obraAtual();
-    if (o.linhaBase && !(await ask('Substituir a linha de base atual pelo cronograma de hoje?', 'Substituir'))) return;
+    if (o.linhaBase && !(await ask('Aprovar o cronograma de hoje como nova linha de base? A linha de base anterior fica guardada no histórico (não é apagada).', 'Aprovar nova'))) return;
     const c = contexto(o); const itens = {};
     for (const n of c.cron.nos.values()) itens[n.id] = { inicio: n.inicio, termino: n.termino };
-    o.linhaBase = { data: todayISO(), itens };
+    o.linhasBase ||= [];
+    if (o.linhaBase) o.linhasBase.unshift(o.linhaBase);
+    o.linhaBase = { data: todayISO(), itens, termino: c.cron.termino, custo: c.calc.totalAlocado, revisao: o.linhasBase.length };
+    registrar(o, 'Linha de base aprovada', `revisão ${o.linhaBase.revisao} · término ${fmtBR(c.cron.termino)} · ${fmtBRL(o.linhaBase.custo)}`, usuario());
     commit(o); toast('Linha de base salva.');
   },
-  async clearBase() { const o = obraAtual(); if (!(await ask('Remover a linha de base?', 'Remover'))) return; o.linhaBase = null; commit(o); },
+  async clearBase() { const o = obraAtual(); if (!(await ask('Deixar de comparar com a linha de base? Ela fica guardada no histórico.', 'Remover'))) return; o.linhasBase ||= []; if (o.linhaBase) o.linhasBase.unshift(o.linhaBase); o.linhaBase = null; registrar(o, 'Linha de base retirada da comparação', '', usuario()); commit(o); },
 
   // Acompanhamento
   registrarMedicao() {
@@ -898,7 +1001,29 @@ export const acoesObra = {
   },
 };
 
+const ROTULOS_CADASTRO = {
+  codigo: 'código', status: 'status', tipoEmpreendimento: 'tipo de empreendimento', endereco: 'endereço', cidade: 'cidade',
+  engenheiro: 'responsável técnico', crea: 'CREA/CAU', terminoPlanejado: 'término planejado', inicioReal: 'início real',
+  'cliente.nome': 'nome', 'cliente.contato': 'contato', 'cliente.telefone': 'telefone', 'cliente.email': 'e-mail',
+};
+
 export const mudancasObra = {
+  obraTexto(d, el) {
+    const o = obraAtual(); const antes = o[d.f] || '';
+    o[d.f] = el.value.trim();
+    if (antes !== o[d.f]) registrar(o, `Cadastro: ${ROTULOS_CADASTRO[d.f] || d.f}`, `${antes || '—'} → ${o[d.f] || '—'}`, usuario());
+    commit(o);
+  },
+  obraCliente(d, el) {
+    const o = obraAtual(); const antes = o.cliente?.[d.f] || '';
+    o.cliente = { ...(o.cliente || {}), [d.f]: el.value.trim() };
+    if (antes !== o.cliente[d.f]) registrar(o, `Cadastro: cliente (${ROTULOS_CADASTRO['cliente.' + d.f] || d.f})`, `${antes || '—'} → ${o.cliente[d.f] || '—'}`, usuario());
+    commit(o);
+  },
+  obraValor(d, el) { const o = obraAtual(); const antes = o.valorContratado; o.valorContratado = parseNum(el.value); registrar(o, 'Valor contratado alterado', `${antes != null ? fmtBRL(antes) : '—'} → ${o.valorContratado != null ? fmtBRL(o.valorContratado) : '—'}`, usuario()); commit(o); },
+  curvaRef(d, el) { ui.curvaRef = el.value || todayISO(); queueRender(); },
+  obraDistrib(d, el) { const o = obraAtual(); o.distribuicaoPadrao = el.value; registrar(o, 'Distribuição padrão alterada', PERFIS_DISTRIBUICAO[el.value], usuario()); commit(o); },
+  obraPeso(d, el) { const o = obraAtual(); o.pesoFisico = el.value; registrar(o, 'Critério de peso físico alterado', PESOS_FISICOS[el.value], usuario()); commit(o); },
   async itemComp(d, el) {
     const o = obraAtual(); const it = o.orcamento.find((x) => x.id === d.id);
     if (el.value === '__new__') { const cpos = await novaComposicaoRapida(); if (cpos) it.composicaoId = cpos.id; }

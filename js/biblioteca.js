@@ -103,7 +103,7 @@ export function viewObras() {
       <div class="meta">
         <div>Início<b>${fmtBR(cron.inicio)}</b></div>
         <div>Término previsto<b>${o.eap.length ? fmtBR(cron.termino) : '—'}</b></div>
-        <div>Prazo<b>${cron.durTotal} dias úteis</b></div>
+        <div>Prazo<b>${cron.durTotal} ${cron.unidDias}</b></div>
         <div>Orçamento<b>${fmtBRL(calc.totalOrcamento)}</b></div>
       </div>
       <div class="progress" title="Avanço físico executado: ${fmtNum(av.fisicoReal, 1)}%"><div style="width:${Math.min(100, av.fisicoReal)}%"></div></div>
@@ -123,7 +123,7 @@ export function viewObras() {
           ${padrao ? '<span class="badge info">modelo inicial</span>' : `<button class="btn sm" data-act="modeloPadrao" data-id="${m.id}">Tornar inicial</button>`}
           <a class="btn sm" href="#/fases/${m.id}">Editar fases</a>
           <button class="icon-btn danger" data-act="delModelo" data-id="${m.id}" title="Excluir modelo">${I.trash}</button></div>`;
-      }).join('') : `<div class="list-item muted small">Nenhum modelo. Importe a planilha, crie um na aba <a href="#/fases">Fases</a> ou, numa obra, use Configurações › Salvar EAP como modelo.</div>`}</div>`;
+      }).join('') : `<div class="list-item muted small">Nenhum modelo. Importe a planilha, crie um na aba <a href="#/fases">Fases</a> ou, numa obra, use Cadastro › Salvar EAP como modelo.</div>`}</div>`;
 }
 
 /* ---------- Composições ---------- */
@@ -228,7 +228,7 @@ async function criarObraDoModelo(m, nome, inicio) {
   if (m.premissas?.eficiencia > 0) o.eficiencia = m.premissas.eficiencia;
   const res = instanciarModelo(o, m, r.sel, { orcamento: r.orcamento, quantidades: r.quantidades }, lib);
   store.addObra(o);
-  location.hash = `#/obra/${o.id}/atividades`;
+  location.hash = `#/obra/${o.id}/painel`;
   if (res.avisos.length) setTimeout(() => info('Obra criada', `<p style="margin-top:0">${o.eap.length} itens na EAP, ${o.dependencias.length} predecessoras, ${o.orcamento.length} itens de orçamento.</p><details><summary>${res.avisos.length} aviso(s)</summary><ul class="small">${res.avisos.slice(0, 40).map((a) => `<li>${esc(a)}</li>`).join('')}</ul></details>`), 80);
   return o;
 }
@@ -274,7 +274,7 @@ export const acoesBiblioteca = {
     let o;
     if (v.base.startsWith('o:')) { o = store.duplicateObra(store.obra(v.base.slice(2)), v.nome.trim()); o.inicio = v.inicio; store.touch(o); }
     else o = store.addObra(novaObra({ nome: v.nome.trim(), inicio: v.inicio }));
-    location.hash = `#/obra/${o.id}/atividades`;
+    location.hash = `#/obra/${o.id}/painel`;
   },
   modeloPadrao(d) { const lib = store.lib(); lib.modeloPadraoId = d.id; commit(lib); toast('Modelo inicial definido.'); },
   async modeloRenomear(d) {

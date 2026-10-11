@@ -4,6 +4,8 @@
 // atividade de duração 0 é marco: ef = es − 1).
 //   FS (término→início): es ≥ ef(pred) + 1 + lag      ("3.2 TI-10" = lag −10 → 10 dias úteis de sobreposição)
 //   SS (início→início):  es ≥ es(pred) + lag          ("3.1 II+5")
+//   FF (término→término): ef ≥ ef(pred) + lag         ("3.2 TT+2")
+//   SF (início→término):  ef ≥ es(pred) − 1 + lag     ("3.2 IT")
 // Prioridade do início: início real > início fixado > predecessoras. Fim real substitui o fim calculado.
 // Atividades de nível superior agregam as filhas (menor início, maior término). Ciclos são detectados e bloqueados.
 
@@ -58,12 +60,15 @@ export class Calendario {
 }
 
 export function calendarioDaObra(obra, lib) {
+  // dias corridos: todos os dias contam (sem fim de semana nem feriado)
+  if (obra.calendario?.tipo === 'corridos') return new Calendario({ inicio: obra.inicio, dias: [0, 1, 2, 3, 4, 5, 6], feriados: [] });
   return new Calendario({
     inicio: obra.inicio,
     dias: obra.calendario?.dias,
     feriados: [...(obra.calendario?.feriados || []), ...(lib?.feriadosGlobais || [])],
   });
 }
+const TIPOS_DEP = new Set(['FS', 'SS', 'FF', 'SF']);
 
 /**
  * @param obra  obra v2
@@ -85,8 +90,9 @@ export function cronograma(obra, lib, calc, cal = calendarioDaObra(obra, lib)) {
     const s = nos.get(d.atividadeId), p = nos.get(d.predecessoraId);
     if (!s || !p || s === p) continue;
     const lag = Number(d.lag) || 0;
-    s.preds.push({ no: p, tipo: d.tipo === 'SS' ? 'SS' : 'FS', lag });
-    p.succs.push({ no: s, tipo: d.tipo === 'SS' ? 'SS' : 'FS', lag });
+    const tipo = TIPOS_DEP.has(d.tipo) ? d.tipo : 'FS';
+    s.preds.push({ no: p, tipo, lag });
+    p.succs.push({ no: s, tipo, lag });
   }
 
   // Grafo para ordenação: predecessora → sucessora e filha → pai
@@ -123,7 +129,11 @@ export function cronograma(obra, lib, calc, cal = calendarioDaObra(obra, lib)) {
       es = 0;
       for (const p of n.preds) {
         if (p.no.ciclo && !n.ciclo) continue;
-        es = Math.max(es, p.tipo === 'SS' ? p.no.es + p.lag : p.no.ef + 1 + p.lag);
+        es = Math.max(es,
+          p.tipo === 'SS' ? p.no.es + p.lag
+            : p.tipo === 'FF' ? p.no.ef + p.lag - n.dur + 1
+              : p.tipo === 'SF' ? p.no.es + p.lag - n.dur
+                : p.no.ef + 1 + p.lag);
       }
       es = Math.max(0, es);
     }
@@ -151,6 +161,8 @@ export function cronograma(obra, lib, calc, cal = calendarioDaObra(obra, lib)) {
     }
     for (const s of n.succs) {
       if (s.tipo === 'SS') lsCap = Math.min(lsCap, s.no.ls - s.lag);
+      else if (s.tipo === 'FF') lf = Math.min(lf, s.no.lf - s.lag);
+      else if (s.tipo === 'SF') lsCap = Math.min(lsCap, s.no.lf + 1 - s.lag);
       else lf = Math.min(lf, s.no.ls - 1 - s.lag);
     }
     if (!n.folha) { n.lfLim = lf; n.lsLim = lsCap; continue; }
@@ -179,6 +191,7 @@ export function cronograma(obra, lib, calc, cal = calendarioDaObra(obra, lib)) {
     nos, cal, ciclo: cicloIds.length > 0, cicloIds,
     inicio, termino: folhas.length ? cal.date(Math.max(0, fim)) : cal.base,
     durTotal: folhas.length ? fim - Math.min(...folhas.map((n) => n.es)) + 1 : 0,
+    unidDias: obra.calendario?.tipo === 'corridos' ? 'dias corridos' : 'dias úteis',
   };
 }
 

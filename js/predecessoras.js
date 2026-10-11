@@ -5,6 +5,8 @@
 //   "3.2+2"            → FS lag +2  (2 dias úteis de folga após o fim)
 //   "3.1 II+5"         → SS lag +5  (começa 5 dias úteis após o início da 3.1)
 //   "3.1 II"           → SS lag 0
+//   "3.2 TT+2"         → FF lag +2  (termina 2 dias úteis depois do término da 3.2)
+//   "3.2 IT"           → SF lag 0   (termina quando a 3.2 começa)
 //   "6.1/6.2/6.4 TI-5" → várias predecessoras com o mesmo tipo e lag (vale a data mais tardia)
 //   "1.2; 3.1 II"      → grupos separados por ";"
 //   "-", "—" ou vazio  → sem predecessora
@@ -26,8 +28,7 @@ export function parseNotacao(texto) {
     const codigos = m[1].split('/').map((c) => c.trim());
     const tipoTxt = (m[2] || '').toUpperCase();
     const lag = m[3] ? parseInt(m[3].replace(/\s+/g, ''), 10) : 0;
-    const tipo = tipoTxt === 'II' || tipoTxt === 'SS' ? 'SS' : 'FS';
-    if (tipoTxt === 'TT' || tipoTxt === 'IT') throw new Error(`Tipo "${tipoTxt}" não é suportado (use término→início ou II).`);
+    const tipo = { II: 'SS', SS: 'SS', TT: 'FF', FF: 'FF', IT: 'SF', SF: 'SF' }[tipoTxt] || 'FS';
     for (const codigo of codigos) deps.push({ codigo, tipo, lag });
   }
   return { deps, obs: '', textoLivre: false };
@@ -48,7 +49,10 @@ export function formatNotacao(deps, codigoDe) {
     const [tipo, lagS] = k.split('|');
     const lag = Number(lagS);
     let suf = '';
-    if (tipo === 'SS') suf = ' II' + (lag ? (lag > 0 ? `+${lag}` : `${lag}`) : '');
+    const sinal = lag ? (lag > 0 ? `+${lag}` : `${lag}`) : '';
+    if (tipo === 'SS') suf = ' II' + sinal;
+    else if (tipo === 'FF') suf = ' TT' + sinal;
+    else if (tipo === 'SF') suf = ' IT' + sinal;
     else if (lag < 0) suf = ` TI${lag}`;
     else if (lag > 0) suf = `+${lag}`;
     partes.push(codigos.join('/') + suf);

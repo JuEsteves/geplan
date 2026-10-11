@@ -69,7 +69,7 @@ export function calcular(obra, lib) {
     const coef = num(I.lider?.coef);
     const hh = qtd * coef;
     const custo = I.total * pct;
-    const r = { v, item: I.item, atividade: A.a, pct, qtd, unidade: I.comp?.unidade || '', coef, funcao: I.lider?.funcao || '', hh, custo };
+    const r = { v, item: I.item, atividade: A.a, pct, qtd, unidade: I.comp?.unidade || I.item.unidade || '', coef, funcao: I.lider?.funcao || '', hh, custo };
     vinculos.push(r);
     I.vinculos.push(r); I.pctSoma += pct;
     A.vinculos.push(r); A.hh += hh; A.custo += custo;

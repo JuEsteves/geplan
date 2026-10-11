@@ -67,6 +67,8 @@ export function duplicateObra(src, nome = src.nome + ' (cópia)') {
   const map = new Map();
   const novo = (old) => { const n = uid(); map.set(old, n); return n; };
   copy.id = uid(); copy.nome = nome; copy.linhaBase = null; copy.medicoes = []; copy.rdo = [];
+  // a cópia leva orçamento, EAP e cronograma — não a execução nem o financeiro da obra original
+  Object.assign(copy, { linhasBase: [], medicoesAtiv: [], diario: [], compromissos: [], despesas: [], historico: [], revisoesOrcamento: [], inicioReal: '', status: 'Planejamento' });
   copy.eap.forEach((a) => { a.id = novo(a.id); a.pct = 0; a.inicioReal = ''; a.fimReal = ''; a.status = ''; });
   copy.eap.forEach((a) => { a.parentId = a.parentId ? map.get(a.parentId) : null; });
   copy.orcamento.forEach((it) => { it.id = novo(it.id); });

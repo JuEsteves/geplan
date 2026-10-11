@@ -25,14 +25,14 @@ export async function exportExcel(o, c) {
   await loadScript(LIBS.xlsx);
   const X = window.XLSX;
   const wb = X.utils.book_new();
-  const cab = [[`Cronograma — ${o.nome}`], [`Início ${fmtBR(c.cron.inicio)} · Término ${fmtBR(c.cron.termino)} · ${c.cron.durTotal} dias úteis · Jornada ${fmtNum(c.calc.jornada)} h · Eficiência ${fmtNum(c.calc.eficiencia)}`], []];
+  const cab = [[`Cronograma — ${o.nome}`], [`Início ${fmtBR(c.cron.inicio)} · Término ${fmtBR(c.cron.termino)} · ${c.cron.durTotal} ${c.cron.unidDias} · Jornada ${fmtNum(c.calc.jornada)} h · Eficiência ${fmtNum(c.calc.eficiencia)}`], []];
 
   const ws = X.utils.aoa_to_sheet([...cab, HEAD_ATIV, ...linhasAtividades(c).map((r) => r.cells)]);
   ws['!cols'] = [10, 6, 50, 18, 16, 9, 8, 10, 10, 10, 11, 11, 11, 18, 7, 7, 14, 10, 40].map((w) => ({ wch: w }));
   X.utils.book_append_sheet(wb, ws, 'Atividades');
 
   const orc = [['Item', 'Etapa', 'Subetapa', 'Cód. composição', 'Descrição', 'Unid.', 'Quantidade', 'Custo unit. (R$)', 'Total (R$)', '% vinculado', 'Verificação'],
-    ...o.orcamento.map((it) => { const I = c.calc.itens.get(it.id); return [it.codigo, it.etapa, it.subetapa, I.comp?.codigo || '', I.comp?.descricao || '', I.comp?.unidade || '', it.quantidade, it.custoUnit, r2(I.total), r2(I.pctSoma * 100) / 100, I.status]; }),
+    ...o.orcamento.map((it) => { const I = c.calc.itens.get(it.id); return [it.codigo, it.etapa, it.subetapa, I.comp?.codigo || '', I.comp?.descricao || it.descricao || '', I.comp?.unidade || it.unidade || '', it.quantidade, it.custoUnit, r2(I.total), r2(I.pctSoma * 100) / 100, I.status]; }),
     ['', '', '', '', '', '', '', 'Total', r2(c.calc.totalOrcamento)]];
   X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(orc), 'Orcamento');
 
@@ -45,7 +45,7 @@ export async function exportExcel(o, c) {
   for (const cp of c.lib.composicoes.filter((x) => usadas.has(x.id))) for (const m of cp.maoObra) comp.push([cp.codigo, cp.descricao, cp.unidade, m.funcao, m.coef, m.lider ? 'S' : 'N', cp.fonte, cp.versao]);
   X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(comp), 'Composicoes');
 
-  const cs = curvaS(c.calc, c.cron, 'mes');
+  const cs = curvaS(c.calc, c.cron, 'mes', c.o);
   const curva = [['Mês', 'Físico no período (%)', 'Físico acumulado (%)', 'Financeiro no período (R$)', 'Financeiro acumulado (R$)'],
     ...cs.periodos.map((p) => [p.label, r2(p.fisPer), r2(p.fisAc), r2(p.finPer), r2(p.finAc)])];
   X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(curva), 'Curva S');
@@ -53,6 +53,25 @@ export async function exportExcel(o, c) {
   if (o.medicoes?.length) {
     X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet([['Data', 'Físico plan. (%)', 'Físico real (%)', 'Financeiro plan. (R$)', 'Financeiro real (R$)'],
       ...o.medicoes.map((m) => [m.data.split('-').reverse().join('/'), r2(m.fisicoPlan), r2(m.fisico), m.financeiroPlan == null ? '' : r2(m.financeiroPlan), m.financeiro == null ? '' : r2(m.financeiro)])]), 'Medições');
+  }
+  const br = (iso) => (iso ? iso.split('-').reverse().join('/') : '');
+  const porId = new Map(o.eap.map((a) => [a.id, a]));
+  if (o.medicoesAtiv?.length) {
+    X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet([['Data', 'Atividade', 'Descrição', 'Método', 'Qtd acumulada', 'Unid.', '% acumulado', 'Responsável', 'Observação'],
+      ...[...o.medicoesAtiv].sort((a, b) => a.data.localeCompare(b.data)).map((m) => { const a = porId.get(m.atividadeId); return [br(m.data), a?.codigo || '', a?.descricao || '', m.metodo, m.qtdAcum ?? '', m.unidade || '', r2(m.pct), m.responsavel || '', m.obs || '']; })]), 'Medicoes_Avanco');
+  }
+  const itens = new Map(o.orcamento.map((it) => [it.id, it]));
+  if (o.compromissos?.length) {
+    X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet([['Tipo', 'Número', 'Fornecedor', 'Objeto', 'Categoria', 'Item orç.', 'Data', 'Valor (R$)', 'Aditivos (R$)', 'Total (R$)', 'Status'],
+      ...o.compromissos.map((k) => { const ad = (k.aditivos || []).reduce((s, x) => s + (Number(x.valor) || 0), 0); return [k.tipo, k.numero || '', k.fornecedor || '', k.objeto || '', k.categoria || '', itens.get(k.itemId)?.codigo || '', br(k.data), r2(k.valor), r2(ad), r2((Number(k.valor) || 0) + ad), k.status || '']; })]), 'Contratos_Pedidos');
+  }
+  if (o.despesas?.length) {
+    const comp = new Map((o.compromissos || []).map((k) => [k.id, k]));
+    X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet([['Data', 'Documento', 'Fornecedor', 'Descrição', 'Categoria', 'Contrato/pedido', 'Item orç.', 'Valor (R$)', 'Pago (R$)', 'Vencimento'],
+      ...o.despesas.map((d) => { const k = comp.get(d.compromissoId); return [br(d.data), d.documento || '', d.fornecedor || '', d.descricao || '', d.categoria || '', k ? `${k.tipo} ${k.numero || ''}`.trim() : '', itens.get(d.itemId)?.codigo || '', r2(d.valor), r2((d.pagamentos || []).reduce((s, p) => s + (Number(p.valor) || 0), 0)), br(d.vencimento)]; })]), 'Despesas');
+  }
+  if (o.historico?.length) {
+    X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet([['Quando', 'Ação', 'Detalhe', 'Usuário'], ...o.historico.map((h) => [new Date(h.em).toLocaleString('pt-BR'), h.acao, h.detalhe || '', h.usuario || ''])]), 'Historico');
   }
   X.writeFile(wb, `Cronograma - ${safeName(o.nome)}.xlsx`);
 }
@@ -71,7 +90,7 @@ export async function exportPDF(o, c, linhas) {
     if (logo) doc.addImage(logo, 'PNG', W - M - 46, M - 3, 46, 11); else doc.text('GEPLAN', W - M, M + 4, { align: 'right' });
     doc.text(title, M, M + 4);
     doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(90);
-    doc.text(`${o.nome}  •  Início ${fmtBR(c.cron.inicio)}  •  Término ${fmtBR(c.cron.termino)}  •  ${c.cron.durTotal} dias úteis  •  Emitido em ${fmtBR(todayDay())}`, M, M + 10);
+    doc.text(`${o.nome}  •  Início ${fmtBR(c.cron.inicio)}  •  Término ${fmtBR(c.cron.termino)}  •  ${c.cron.durTotal} ${c.cron.unidDias}  •  Emitido em ${fmtBR(todayDay())}`, M, M + 10);
   };
   const rows = linhas.length ? linhas : c.o.eap;
 

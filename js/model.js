@@ -47,15 +47,41 @@ export function novaComposicao(p = {}) {
   };
 }
 
+export const STATUS_OBRA = ['Orçamento', 'Planejamento', 'Em execução', 'Paralisada', 'Concluída', 'Cancelada'];
+export const CATEGORIAS_CUSTO = ['Material', 'Mão de obra', 'Equipamento', 'Serviço terceirizado', 'Indireto', 'Outro'];
+export const PERFIS_DISTRIBUICAO = { linear: 'Linear (uniforme)', inicio: 'Concentrado no início', fim: 'Concentrado no fim', sino: 'Curva em sino (lento-rápido-lento)' };
+export const PESOS_FISICOS = { hh: 'Horas-homem (HH)', custo: 'Custo alocado', duracao: 'Duração', manual: 'Peso manual por atividade' };
+export const TIPOS_OCORRENCIA = ['Ocorrência', 'Interferência', 'Impedimento', 'Acidente/segurança', 'Visita técnica'];
+
+/** Campos que toda obra deve ter (cadastro, financeiro, execução). Usado na criação e na migração. */
+export function garantirCamposObra(o) {
+  o.codigo ??= ''; o.cliente ||= { nome: '', contato: '', telefone: '', email: '' };
+  o.endereco ??= ''; o.cidade ??= ''; o.tipoEmpreendimento ??= 'Residencial unifamiliar';
+  o.engenheiro ??= ''; o.crea ??= ''; o.terminoPlanejado ??= ''; o.inicioReal ??= '';
+  o.valorContratado ??= null; o.status ??= 'Planejamento';
+  o.bdi ||= { ac: 0, s: 0, r: 0, g: 0, df: 0, l: 0, i: 0 };
+  o.distribuicaoPadrao ??= 'linear'; o.pesoFisico ??= 'hh';
+  o.calendario ||= { dias: [1, 2, 3, 4, 5], feriados: [] }; o.calendario.tipo ??= 'uteis';
+  for (const k of ['historico', 'revisoesOrcamento', 'medicoesAtiv', 'diario', 'compromissos', 'despesas', 'medicoes', 'rdo']) o[k] ||= [];
+  return o;
+}
+
 export function novaObra({ nome, inicio }) {
-  return {
+  return garantirCamposObra({
     id: uid(), kind: 'obra', schemaVersion: SCHEMA, nome, inicio,
     jornada: 8.8, eficiencia: 0.85,
-    calendario: { dias: [1, 2, 3, 4, 5], feriados: [] },
+    calendario: { dias: [1, 2, 3, 4, 5], feriados: [], tipo: 'uteis' },
     duracaoPadrao: { ...DURACAO_PADRAO },
     orcamento: [], eap: [], dependencias: [], vinculos: [],
     linhaBase: null, medicoes: [], rdo: [], updatedAt: 0,
-  };
+  });
+}
+
+/** Histórico de alterações importantes da obra (quem, quando, o quê). */
+export function registrar(o, acao, detalhe = '', usuario = '') {
+  o.historico ||= [];
+  o.historico.unshift({ id: uid(), em: new Date().toISOString(), usuario, acao, detalhe });
+  if (o.historico.length > 800) o.historico.length = 800;
 }
 
 export function novaAtividade(p = {}) {
@@ -68,7 +94,7 @@ export function novaAtividade(p = {}) {
 }
 
 export function novoItem(p = {}) {
-  return { id: uid(), codigo: '', etapa: '', subetapa: '', composicaoId: '', descricao: '', quantidade: 0, custoUnit: 0, ...p };
+  return { id: uid(), codigo: '', etapa: '', subetapa: '', composicaoId: '', descricao: '', unidade: '', quantidade: 0, custoUnit: 0, ...p };
 }
 
 /* ---------- árvore da EAP ---------- */
@@ -156,8 +182,7 @@ export function migrateObra(o, lib) {
   if ((o.schemaVersion || 1) >= SCHEMA) {
     o.orcamento ||= []; o.eap ||= []; o.dependencias ||= []; o.vinculos ||= []; o.medicoes ||= []; o.rdo ||= [];
     o.duracaoPadrao ||= { ...DURACAO_PADRAO };
-    o.calendario ||= { dias: [1, 2, 3, 4, 5], feriados: [] };
-    return o;
+    return garantirCamposObra(o);
   }
   const etapasLib = lib.etapasV1 || lib.etapas || [];
   const comps = new Map((lib.composicoes || []).map((c) => [c.id, c]));
@@ -195,5 +220,5 @@ export function migrateObra(o, lib) {
     medicoes: (o.medicoes || []).map((m) => ({ data: m.data, fisico: m.real, fisicoPlan: m.plan, financeiro: null, financeiroPlan: null })),
     rdo: [], updatedAt: o.updatedAt || 0,
   };
-  return renumerar(n);
+  return garantirCamposObra(renumerar(n));
 }

@@ -7,6 +7,7 @@ import { esc, ui, toast, ask, setRenderer, queueRender } from './ui.js';
 import { viewObra, acoesObra, mudancasObra, entradasObra, depoisObra } from './obra.js';
 import { viewObras, viewComposicoes, viewImportar, acoesBiblioteca, mudancasBiblioteca, entradasBiblioteca } from './biblioteca.js';
 import { viewFases, acoesFases, mudancasFases, entradasFases } from './fases.js';
+import { acoesGestao, mudancasGestao } from './gestao.js';
 import { viewSinapi, acoesSinapi, mudancasSinapi, entradasSinapi, depoisSinapi } from './sinapi.js';
 
 /* ---------- acesso (login com Google + lista de contas autorizadas) ---------- */
@@ -196,8 +197,8 @@ const mudancasGerais = {
 };
 
 /* ---------- eventos ---------- */
-const acoes = { ...acoesGerais, ...acoesBiblioteca, ...acoesObra, ...acoesFases, ...acoesSinapi };
-const mudancas = { ...mudancasGerais, ...mudancasBiblioteca, ...mudancasObra, ...mudancasFases, ...mudancasSinapi };
+const acoes = { ...acoesGerais, ...acoesBiblioteca, ...acoesObra, ...acoesFases, ...acoesSinapi, ...acoesGestao };
+const mudancas = { ...mudancasGerais, ...mudancasBiblioteca, ...mudancasObra, ...mudancasFases, ...mudancasSinapi, ...mudancasGestao };
 const entradas = { ...entradasBiblioteca, ...entradasObra, ...entradasFases, ...entradasSinapi };
 
 $view.addEventListener('click', (e) => {
@@ -205,7 +206,7 @@ $view.addEventListener('click', (e) => {
   if (!el || el.disabled) return;
   const a = acoes[el.dataset.act];
   if (!a) return;
-  if (el.tagName !== 'A') e.preventDefault();
+  if (el.tagName !== 'A' || el.getAttribute('href') === '#') e.preventDefault();
   Promise.resolve(a(el.dataset, el, e)).catch((err) => toast(err.message || String(err), 5000));
 });
 $view.addEventListener('change', (e) => {

@@ -11,7 +11,13 @@ const CHAVE_ANTES = 'planobras:antes-da-nuvem';   // cópia dos dados do aparelh
 export const status = { state: 'local', message: '' };
 const ouvintes = new Set();
 export const onStatus = (fn) => ouvintes.add(fn);
-const setStatus = (state, message = '') => { Object.assign(status, { state, message }); ouvintes.forEach((f) => f(status)); };
+let confirmadoEm = 0;   // última vez que o servidor confirmou leitura/gravação (só em sucesso real)
+export const ultimaConfirmacao = () => confirmadoEm;
+const setStatus = (state, message = '') => {
+  if (state === 'ok') confirmadoEm = Date.now();
+  Object.assign(status, { state, message });
+  ouvintes.forEach((f) => f(status));
+};
 
 let ctx = null;          // { userId, email, orgId, orgNome, papel }
 let snaps = {};          // fotografias da última versão confirmada pelo banco (por obra + biblioteca)

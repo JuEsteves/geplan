@@ -21,6 +21,29 @@ coeficientes de produtividade (h/unid). Fluxo:
 11. **Base SINAPI** (Composições › Base SINAPI) – a Caixa não tem API pública; importe a planilha analítica mensal (XLSX do ZIP por UF). A base fica no aparelho (IndexedDB), pesquisável; "Adicionar à biblioteca" cria a composição com as funções de mão de obra (itens em horas) e a líder sugerida. "Duplicar como própria" cria uma composição própria a partir de qualquer outra.
 9. **Variantes de escopo** – etapas com letra (ex.: 11B Piscina de fibra, alternativa à 11). Só uma por etapa entra na obra; predecessoras externas são trocadas automaticamente (17.1.1: 11.9.5 → 11B.9.5).
 
+## Gestão da obra (abas da obra)
+
+| Aba | O que faz |
+|---|---|
+| **Painel** | Indicadores com filtro por etapa: orçado, preço de venda (BDI), contratado, comprometido, incorrido, pago, físico planejado × realizado, SPI/CPI, previsão de custo final (EAC) e de término, atividades atrasadas e críticas, pendências do diário. |
+| **Orçamento** | Itens por etapa/subetapa com subtotais, **BDI pela fórmula do TCU** `[(1+AC+S+R+G)(1+DF)(1+L)]/(1−I) − 1` (aplicado uma vez sobre o custo direto), preço de venda, **revisões** salvas (R0, R1…) e **comparação** entre revisões. **Importar Excel**: escolhe a aba e a linha do cabeçalho, associa as colunas (sugestão automática), mostra a pré-visualização com erros (obrigatórios, números, código repetido) e pergunta se só inclui os novos ou também **atualiza pelo código**; salva uma revisão antes e registra no histórico. Nada é gravado antes da confirmação. |
+| **Atividades / Gantt** | EAP, predecessoras FS/SS/FF/SF com defasagem, caminho crítico, Gantt por dia/semana/mês. **Linha de base**: aprovar uma nova guarda a anterior (`linhasBase`), nunca apaga. Menu ⋯ da atividade: responsável, equipe executora, perfil de distribuição, método de medição, peso manual, datas reais. |
+| **Físico-financeiro** | Curva S física e financeira planejada × real, por dia/semana/mês, com data de referência. Perfis de distribuição (linear, início, fim, sino; centavos sem perda — o resíduo vai no último dia) e **peso físico** configurável (HH, custo, duração ou manual). |
+| **Medições** | Avanço **acumulado** por atividade (por % ou por quantidade, limitado a 100%). Uma medição por atividade e data: lançar de novo na mesma data **substitui**, não soma. A % da atividade, o início real (1ª medição > 0) e o fim real (1ª com 100%) saem das medições. |
+| **Diário de obra** | Um registro por data: clima manhã/tarde, dia praticável, equipe por função, serviços (ligados às atividades), materiais, equipamentos, visitas, reuniões, ocorrências/impedimentos (com pendências em aberto), observações. Filtros e exportação PDF/Excel. |
+| **Financeiro** | Contratos e pedidos (com aditivos e status), despesas (NF/recibo) com pagamentos. **Sem duplicidade**: despesa ligada a um contrato não soma de novo no comprometido; aviso de nota repetida (mesmo documento + fornecedor) e de despesas acima do contratado. Comprometido, incorrido, pago, a pagar e por etapa/categoria. |
+| **Cadastro** | Código, status, cliente, endereço, responsável técnico, prazos, valor contratado, jornada/eficiência, calendário (**dias úteis** ou **dias corridos**), feriados e **histórico de alterações** (quem, quando, o quê). |
+
+Indicadores: `EV = Σ custo × % executado`, `CPI = EV ÷ custo incorrido`, `SPI = EV ÷ PV`, `EAC = incorrido + (orçado − EV)`.
+"Financeiro realizado" é custo incorrido — **não** é usado como avanço físico.
+
+### Limitações conhecidas
+- **Sem servidor**: os dados ficam no aparelho e no Google Drive de quem entra. Não há várias pessoas editando a mesma obra
+  ao mesmo tempo nem perfis com permissões diferentes. A lista de e-mails em `js/config.js` só controla quem passa da tela de
+  entrada — **não é segurança de servidor**. Para multiusuário com permissões verificadas no servidor é preciso um backend
+  (ex.: Supabase ou Firebase), que depende de criar a conta e as credenciais.
+- Fotos e anexos no diário, cotações de compra e integração com a base SINAPI oficial (arquivo real da Caixa) ainda não foram feitos/validados.
+
 ### Predecessoras (mesma notação da planilha)
 | Digite | Significado |
 |---|---|
@@ -36,13 +59,11 @@ coeficientes de produtividade (h/unid). Fluxo:
 ### Testes
 Abra `tests/index.html` pelo servidor local (`tools\serve.ps1`, ex. http://localhost:8080/tests/). Os testes usam os valores da
 planilha modelo (2.4.4 = 223,3 HH → 10 dias; 7.2.2 = 728 HH → 25 dias; aço 60/40 → 4 e 3 dias; custo alocado = R$ 224.306,00;
-datas com FS, TI negativo, SS com lag, várias predecessoras e feriado) e, se `docs/` tiver a planilha, testam também a importação.
+datas com FS, TI negativo, SS com lag, FF/SF, várias predecessoras e feriado) e cobrem também dias corridos, perfis de distribuição
+e centavos, peso físico, medições sem duplicar, BDI/revisões, custos sem duplicidade, valor agregado e importação de orçamento
+por Excel. Se `docs/` tiver a planilha, testam também a importação do modelo.
 
 > A pasta `docs/` (planilhas das obras) e `tests/` **não** precisam ir para o GitHub: o repositório é público.
-
-### Fase 2 (preparada)
-Cada obra tem a coleção `rdo` (vazia) e as composições têm `versao`/`ativa`, para registrar quantidade executada e horas
-reais por função e gravar o coeficiente real (`horas ÷ quantidade`) como nova versão "Obra própria".
 
 ## Armazenamento
 
@@ -112,7 +133,12 @@ Abra o endereço no Chrome (Android) ou Safari (iPhone):
 index.html              página única do app
 css/styles.css          visual (claro/escuro, computador/celular)
 js/app.js               login, rotas, Google Drive, eventos
-js/obra.js              telas da obra (Orçamento, Vínculos, Atividades, Gantt, Curva S, Acompanhamento, Configurações)
+js/obra.js              telas da obra (Orçamento, Vínculos, Atividades, Gantt, Físico-financeiro, Cadastro)
+js/gestao.js            telas Painel, Medições, Diário de obra e Financeiro
+js/financeiro.js        BDI, revisões do orçamento, custos (comprometido/incorrido/pago), valor agregado
+js/execucao.js          medições de avanço e diário de obra (regras)
+js/orcImport.js         importação de orçamento por Excel (associação de colunas, validação)
+js/fases.js, js/sinapi.js  biblioteca de fases (modelos de EAP) e base SINAPI
 js/biblioteca.js        telas Obras, Composições e Importar planilha
 js/model.js             modelo de dados (v2) e migração do formato antigo
 js/calculo.js           HH, duração, custo alocado e validações (regras da planilha)

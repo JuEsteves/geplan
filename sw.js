@@ -1,9 +1,9 @@
 // Service worker: deixa o site abrir sem internet (os dados ficam no aparelho e sobem ao Drive depois).
-const CACHE = 'geplan-v6';
+const CACHE = 'geplan-v8';
 const SHELL = [
   './', './index.html', './css/styles.css', './manifest.webmanifest',
   './js/app.js', './js/store.js', './js/schedule.js', './js/drive.js', './js/export.js', './js/config.js',
-  './js/model.js', './js/calculo.js', './js/predecessoras.js', './js/cpm.js', './js/curvaS.js', './js/importador.js', './js/libs.js', './js/ui.js', './js/obra.js', './js/biblioteca.js', './js/fases.js', './js/sinapi.js',
+  './js/model.js', './js/calculo.js', './js/predecessoras.js', './js/cpm.js', './js/curvaS.js', './js/importador.js', './js/libs.js', './js/ui.js', './js/obra.js', './js/biblioteca.js', './js/fases.js', './js/sinapi.js', './js/gestao.js', './js/financeiro.js', './js/execucao.js', './js/orcImport.js',
   './icons/logo-full.png', './icons/logo-mark.png', './icons/favicon-64.png', './icons/icon-192.png', './icons/icon-512.png',
 ];
 

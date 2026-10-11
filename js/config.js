@@ -18,5 +18,5 @@ export const ALLOWED_EMAIL_HASHES = [
 //
 // A URL e a chave "anon" (publishable) SÃO PÚBLICAS por natureza: vão para o navegador de qualquer forma.
 // A proteção dos dados vem das políticas RLS do banco. NUNCA coloque aqui a chave "service_role" (secreta).
-export const SUPABASE_URL = '';
-export const SUPABASE_ANON_KEY = '';
+export const SUPABASE_URL = 'https://mywimldrzhvwsffwivpw.supabase.co';
+export const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im15d2ltbGRyemh2d3NmZndpdnB3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE3MTE5ODYsImV4cCI6MjEwNzI4Nzk4Nn0.yo08pdfE4lo0Z8frX5Hc8cOY8U3HZAp2Gks8dypekt8';

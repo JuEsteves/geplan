@@ -62,7 +62,7 @@ export function formDialog({ title, fields, ok = 'Salvar', text = '', html = '' 
     };
     dlg.querySelector('button[value="cancel"]').onclick = () => finish(null);
     dlg.oncancel = () => finish(null);
-    dlg.onclose = () => finish(null);
+    dlg.onclose = () => { if (!dlg.open) finish(null); };
     dlg.showModal();
     dlg.querySelector('input, select, textarea')?.focus();
   });
@@ -79,7 +79,7 @@ export function ask(message, ok = 'Confirmar') {
     dlg.querySelector('button[value="ok"]').onclick = () => finish(true);
     dlg.querySelector('button[value="cancel"]').onclick = () => finish(false);
     dlg.oncancel = () => finish(false);
-    dlg.onclose = () => finish(false);
+    dlg.onclose = () => { if (!dlg.open) finish(false); };
     dlg.showModal();
     dlg.querySelector('button[value="ok"]').focus();
   });

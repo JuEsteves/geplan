@@ -2,7 +2,11 @@
 // Documentos: a biblioteca (composições, feriados gerais, modelos de EAP) e uma obra por documento.
 // Cada documento tem `updatedAt`, usado para decidir quem vence na sincronização.
 
-import { uid, emptyLib, migrateLib, migrateObra, novaObra as criarObraVazia, renumerar } from './model.js';
+import { uid, emptyLib, migrateLib as migrateLibBase, migrateObra, novaObra as criarObraVazia, renumerar } from './model.js';
+import { converterModelo } from './importador.js';
+
+/** Biblioteca: formato v2 + modelos de EAP no formato 3 (editáveis na aba Fases). */
+const migrateLib = (lib) => { const l = migrateLibBase(lib); l.modelosEAP = (l.modelosEAP || []).map(converterModelo); return l; };
 
 export { uid };
 

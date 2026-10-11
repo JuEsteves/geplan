@@ -9,7 +9,18 @@ export const uid = () => Date.now().toString(36) + Math.random().toString(36).sl
 
 export const TIPOS = ['Execução', 'Fornecedor/Compra', 'Espera técnica', 'Inspeção', 'Administrativo'];
 export const DURACAO_PADRAO = { 'Execução': 1, 'Fornecedor/Compra': 5, 'Espera técnica': 3, 'Inspeção': 1, 'Administrativo': 2 };
-export const FONTES = ['Obra própria', 'SINAPI', 'TCPO', 'Outra'];
+// Prioridade de uso: Própria validada (RDO) > SINAPI > SINAPI (família) > Própria (sugerida)
+export const FONTES = ['Própria (validada)', 'SINAPI', 'SINAPI (família)', 'Própria (sugerida)', 'TCPO', 'Outra'];
+
+/** Converte o texto de fonte da planilha para uma das FONTES. */
+export function normalizaFonte(t) {
+  const s = String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+  if (!s) return 'Própria (validada)';
+  if (s.startsWith('sinapi')) return s.includes('famil') ? 'SINAPI (família)' : 'SINAPI';
+  if (s.startsWith('tcpo')) return 'TCPO';
+  if (s.startsWith('propria') || s.startsWith('obra') || s.startsWith('rdo')) return s.includes('suger') ? 'Própria (sugerida)' : 'Própria (validada)';
+  return 'Outra';
+}
 
 /** Converte os textos de tipo da planilha ("Inspeção/Conferência", "Espera técnica (cura/teste)"…) para os 5 tipos. */
 export function normalizaTipo(t) {
@@ -30,7 +41,7 @@ export function emptyLib() {
 
 export function novaComposicao(p = {}) {
   return {
-    id: uid(), codigo: '', descricao: '', unidade: 'm²', fonte: 'Obra própria', versao: 1, ativa: true, obs: '',
+    id: uid(), codigo: '', descricao: '', unidade: 'm²', fonte: 'Própria (validada)', refSinapi: '', etapaEap: '', versao: 1, ativa: true, obs: '',
     maoObra: [{ id: uid(), funcao: 'Pedreiro', coef: 0, lider: true }],
     ...p,
   };
@@ -51,7 +62,7 @@ export function novaAtividade(p = {}) {
   return {
     id: uid(), codigo: '', nivel: 1, parentId: null, etapa: '', subetapa: '', descricao: '',
     tipo: 'Execução', equipe: null, duracaoManual: null, inicioFixado: '', inicioReal: '', fimReal: '',
-    pct: 0, status: '', obs: '', predTexto: '',
+    pct: 0, status: '', obs: '', predTexto: '', varianteDe: null,
     ...p,
   };
 }
@@ -85,6 +96,26 @@ export function renumerar(obra) {
       visit(a.id, a.codigo, nivel + 1);
     });
   };
+  // Etapas alternativas (variantes, só em modelos) usam o número da etapa base + letra: 11, 11B, 11C…
+  const raizes = filhos.get(null) || [];
+  const variantes = raizes.filter((a) => a.varianteDe && raizes.some((b) => b.id === a.varianteDe));
+  if (variantes.length) {
+    const normais = raizes.filter((a) => !variantes.includes(a));
+    normais.forEach((a, i) => { a.codigo = String(i + 1); a.nivel = 1; });
+    const letras = new Map();
+    for (const v of variantes) {
+      const base = raizes.find((b) => b.id === v.varianteDe);
+      const n = (letras.get(base.id) || 0) + 1; letras.set(base.id, n);
+      v.codigo = base.codigo + String.fromCharCode(65 + n); v.nivel = 1;
+    }
+    for (const a of normais) {
+      out.push(a); visit(a.id, a.codigo, 2);
+      for (const v of variantes.filter((x) => x.varianteDe === a.id)) { out.push(v); visit(v.id, v.codigo, 2); }
+    }
+    for (const a of obra.eap) if (!out.includes(a)) { a.parentId = null; out.push(a); }
+    obra.eap = out;
+    return obra;
+  }
   visit(null, '', 1);
   // atividades órfãs (pai removido) vão para a raiz
   for (const a of obra.eap) if (!out.includes(a)) { a.parentId = null; out.push(a); }
@@ -98,6 +129,7 @@ export function migrateLib(lib) {
   if (!lib) return emptyLib();
   if ((lib.schemaVersion || 1) >= SCHEMA) {
     lib.feriadosGlobais ||= []; lib.modelosEAP ||= []; lib.composicoes ||= [];
+    for (const c of lib.composicoes) if (!FONTES.includes(c.fonte)) c.fonte = normalizaFonte(c.fonte);
     return lib;
   }
   const comps = (lib.composicoes || []).map((c, i) => ({
@@ -106,7 +138,7 @@ export function migrateLib(lib) {
 
     descricao: c.nome || c.descricao || '',
     unidade: c.unidade || 'un',
-    fonte: 'Obra própria', versao: 1, ativa: true, obs: c.obs || '',
+    fonte: 'Própria (validada)', refSinapi: '', etapaEap: '', versao: 1, ativa: true, obs: c.obs || '',
     maoObra: [{ id: uid(), funcao: 'Profissional', coef: Number(c.coef) || 0, lider: true }],
   }));
   return {

@@ -3,12 +3,92 @@ import * as store from './store.js';
 import { calcular, validarComposicao, liderDe } from './calculo.js';
 import { cronograma } from './cpm.js';
 import { avanco } from './curvaS.js';
-import { novaComposicao, FONTES, uid, novaObra, novaAtividade, normalizaTipo, renumerar } from './model.js';
-import { lerArquivo, interpretar, aplicarComposicoes, criarObraImportada, modeloDaEAP, montarEAP } from './importador.js';
+import { novaComposicao, FONTES, uid, novaObra } from './model.js';
+import { lerArquivo, interpretar, aplicarComposicoes, modeloDaPlanilha, etapasDoModelo, selecaoPadrao, instanciarModelo } from './importador.js';
 import { fmtBR, fmtNum, fmtBRL, todayISO, todayDay } from './schedule.js';
 import { esc, I, ui, toast, formDialog, ask, info, commit, queueRender, parseNum, fmtIn } from './ui.js';
 
 const natural = (a, b) => String(a).localeCompare(String(b), 'pt-BR', { numeric: true });
+
+/* ---------- Escolha de fases do modelo ---------- */
+
+/**
+ * Janela para escolher as fases (etapas/subetapas) de um modelo. Em obra existente, o que já está na obra aparece
+ * marcado e travado. Resolve com { sel, orcamento, quantidades, novas } ou null.
+ */
+export function escolherFases(m, obra = null) {
+  const etapas = etapasDoModelo(m);
+  // fases do modelo que já estão na obra (pelo vínculo modeloAtivId; obras antigas pelo código original)
+  const porIdM = new Map(m.eap.map((a) => [a.id, a]));
+  const ligados = new Set();
+  for (const a of obra?.eap || []) {
+    if (a.modeloId !== m.id) continue;
+    const n = a.modeloAtivId ? porIdM.get(a.modeloAtivId) : m.eap.find((x) => x.codigoOrig && x.codigoOrig === a.codigoModelo);
+    for (let x = n; x; x = x.parentId ? porIdM.get(x.parentId) : null) ligados.add(x.id);
+  }
+  const etapaNaObra = (e) => ligados.has(e.id);
+  const subNaObra = (s) => ligados.has(s.id);  const padrao = selecaoPadrao(m);
+  const temOrc = (m.orcamento || []).length > 0;
+  const subs = (e, ativa) => e.subetapas.length ? `<details class="fase-subs"><summary>${e.subetapas.length} subetapa(s)</summary>
+    ${e.subetapas.map((s) => {
+      const ja = subNaObra(s);
+      // obra nova: segue a etapa; obra existente: subetapas novas de etapas que já estão na obra começam desmarcadas
+      const marcado = ja || (obra ? !etapaNaObra(e) && ativa : ativa);
+      return `<label class="check"><input type="checkbox" name="s" value="${esc(s.id)}" data-etapa="${esc(e.id)}" ${marcado ? 'checked' : ''} ${ja ? 'disabled' : ''}> <span class="muted">${esc(s.codigo)}</span> ${esc(s.nome)}${ja ? ' <span class="badge">na obra</span>' : ''}</label>`; }).join('')}</details>` : '';
+  const grupos = [];
+  for (const e of etapas) { const g = grupos.find((x) => x.base === e.base); if (g) g.etapas.push(e); else grupos.push({ base: e.base, etapas: [e] }); }
+  const html = grupos.map((g) => {
+    if (g.etapas.length === 1) {
+      const e = g.etapas[0]; const ja = etapaNaObra(e);
+      const marcado = obra ? ja : padrao.etapas.has(e.id);
+      return `<div class="fase"><label class="check"><input type="checkbox" name="e" value="${esc(e.id)}" ${marcado ? 'checked' : ''} ${ja ? 'disabled' : ''}> <b>${esc(e.codigo)}</b> ${esc(e.nome)} <span class="muted small">· ${e.nAtiv} atividades</span>${ja ? ' <span class="badge">na obra</span>' : ''}</label>${subs(e, marcado)}</div>`;
+    }
+    const jaE = g.etapas.find(etapaNaObra);
+    return `<div class="fase fase-var"><div class="small muted" style="margin-bottom:4px">Alternativas — escolha uma:</div>
+      ${g.etapas.map((e) => { const marcado = jaE ? jaE === e : !obra && padrao.etapas.has(e.id); return `<label class="check"><input type="radio" name="v-${esc(g.base)}" value="${esc(e.id)}" ${marcado ? 'checked' : ''} ${jaE ? 'disabled' : ''}> <b>${esc(e.codigo)}</b> ${esc(e.nome)} <span class="muted small">· ${e.nAtiv} atividades</span>${jaE === e ? ' <span class="badge">na obra</span>' : ''}</label>${subs(e, marcado)}`; }).join('')}
+      ${jaE ? '' : `<label class="check"><input type="radio" name="v-${esc(g.base)}" value="" ${obra ? 'checked' : ''}> <span class="muted">Nenhuma</span></label>`}
+    </div>`;
+  }).join('');
+  const dlg = document.getElementById('dlg');
+  dlg.innerHTML = `<form method="dialog" class="dlg-wide"><h2>${obra ? 'Adicionar fases do modelo' : 'Escolha as fases da obra'}</h2>
+    <p class="muted small" style="margin:6px 0 10px">Modelo <b>${esc(m.nome)}</b>. Marque as etapas (e, se quiser, ajuste as subetapas). Você pode adicionar outras fases depois, na aba Atividades.</p>
+    <div class="row" style="margin-bottom:8px"><button type="button" class="btn sm" data-x="todas">Marcar todas</button><button type="button" class="btn sm" data-x="nenhuma">Desmarcar todas</button></div>
+    <div class="fases">${html}</div>
+    ${temOrc ? `<div class="stack" style="margin-top:12px"><label class="check"><input type="checkbox" name="orc" checked> Trazer os itens de orçamento vinculados a essas fases</label>
+      <label class="check"><input type="checkbox" name="qtd"> Com as quantidades e custos do modelo (desmarcado: quantidades zeradas para você preencher)</label></div>` : ''}
+    <div class="actions"><button type="button" class="btn" value="cancel">Cancelar</button><button class="btn primary" value="ok">${obra ? 'Adicionar' : 'Criar obra'}</button></div></form>`;
+  const form = dlg.querySelector('form');
+  // marcar/desmarcar etapa marca/desmarca as subetapas
+  form.addEventListener('change', (ev) => {
+    const t = ev.target;
+    if (t.name === 'e') form.querySelectorAll(`input[name="s"][data-etapa="${CSS.escape(t.value)}"]:not(:disabled)`).forEach((s) => { s.checked = t.checked; });
+    if (t.type === 'radio') {
+      const grupo = form.querySelectorAll(`input[name="${CSS.escape(t.name)}"]`);
+      grupo.forEach((r) => { if (r.value) form.querySelectorAll(`input[name="s"][data-etapa="${CSS.escape(r.value)}"]:not(:disabled)`).forEach((s) => { s.checked = r.checked; }); });
+    }
+  });
+  form.querySelector('[data-x="todas"]').onclick = () => form.querySelectorAll('input[name="e"]:not(:disabled), input[name="s"]:not(:disabled)').forEach((x) => { x.checked = true; });
+  form.querySelector('[data-x="nenhuma"]').onclick = () => form.querySelectorAll('input[name="e"]:not(:disabled), input[name="s"]:not(:disabled)').forEach((x) => { x.checked = false; });
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (v) => { if (done) return; done = true; if (dlg.open) dlg.close(); resolve(v); };
+    form.onsubmit = (e) => {
+      e.preventDefault();
+      const sel = { etapas: new Set(), subetapas: new Set() };
+      form.querySelectorAll('input[name="e"]:checked').forEach((x) => sel.etapas.add(x.value));
+      form.querySelectorAll('input[type="radio"]:checked').forEach((x) => { if (x.value) sel.etapas.add(x.value); });
+      form.querySelectorAll('input[name="s"]:checked').forEach((x) => sel.subetapas.add(x.value));
+      for (const e of etapas) for (const s of e.subetapas) if (subNaObra(s)) { sel.subetapas.add(s.id); sel.etapas.add(e.id); }
+      for (const e of etapas) if (etapaNaObra(e)) sel.etapas.add(e.id);
+      const novas = [...sel.etapas].filter((id) => !ligados.has(id)).length;
+      if (!sel.etapas.size) { toast('Marque pelo menos uma etapa.'); done = false; return; }
+      finish({ sel, novas, orcamento: !!form.querySelector('input[name="orc"]')?.checked, quantidades: !!form.querySelector('input[name="qtd"]')?.checked });
+    };
+    dlg.querySelector('button[value="cancel"]').onclick = () => finish(null);
+    dlg.oncancel = () => finish(null); dlg.onclose = () => { if (!dlg.open) finish(null); };
+    dlg.showModal();
+  });
+}
 
 /* ---------- Obras ---------- */
 export function viewObras() {
@@ -33,16 +113,17 @@ export function viewObras() {
   return `<div class="page-head"><div><h1>Obras</h1><div class="muted">Orçamento, EAP, cronograma e Curva S de cada obra</div></div>
     <div class="row"><a class="btn" href="#/importar">${I.upload} Importar planilha</a><button class="btn primary" data-act="newObra">${I.plus} Nova obra</button></div></div>
     ${list.length ? `<div class="obras-grid">${cards}</div>` : `<div class="card empty"><p>Nenhuma obra ainda.</p>
-      <p class="small">Comece importando a planilha modelo (EAP, composições, orçamento e vínculos) ou crie uma obra do zero.</p>
+      <p class="small">${modelos.length ? 'Crie uma obra a partir do modelo inicial e escolha as fases.' : 'Comece importando a planilha modelo — ela vira o modelo inicial para as próximas obras.'}</p>
       <div class="row" style="justify-content:center"><a class="btn" href="#/importar">${I.upload} Importar planilha</a><button class="btn primary" data-act="newObra">${I.plus} Nova obra</button></div></div>`}
-    ${modelos.length ? `<div class="card" style="margin-top:18px"><div class="card-pad" style="padding-bottom:6px"><h2>Modelos de EAP</h2><div class="muted small">Usados para criar novas obras com a mesma estrutura de etapas e predecessoras.</div></div>
-      ${modelos.map((m) => `<div class="list-item"><span style="flex:1"><b>${esc(m.nome)}</b> <span class="muted small">· ${m.atividades.length} itens · ${m.criadoEm || ''}</span></span><button class="icon-btn danger" data-act="delModelo" data-id="${m.id}" title="Excluir modelo">${I.trash}</button></div>`).join('')}</div>` : ''}`;
-}
-
-/** Cria a EAP de uma obra a partir de um modelo salvo. */
-function aplicarModelo(o, m) {
-  montarEAP(o, m.atividades.map((a) => ({ ...a, nivel: a.nivel || a.codigo.split('.').length })), new Map(m.atividades.filter((a) => a.equipe != null || a.duracaoManual != null).map((a) => [a.codigo, { equipe: a.equipe ?? null, manual: a.duracaoManual ?? null }])));
-  renumerar(o);
+    <div class="card" style="margin-top:18px"><div class="card-pad" style="padding-bottom:6px"><h2>Modelos de EAP</h2><div class="muted small">Ao criar uma obra, você escolhe um modelo e as fases que entram. O modelo inicial (★) vem selecionado.</div></div>
+      ${modelos.length ? modelos.map((m) => {
+        const et = etapasDoModelo(m);
+        const padrao = lib.modeloPadraoId === m.id;
+        return `<div class="list-item"><span style="flex:1"><b>${padrao ? '★ ' : ''}${esc(m.nome)}</b> <span class="muted small">· ${et.filter((e) => !e.variante).length} etapas · ${et.reduce((s, e) => s + e.nAtiv, 0)} atividades${m.orcamento?.length ? ` · ${m.orcamento.length} itens de orçamento` : ''} · ${m.criadoEm || ''}</span></span>
+          ${padrao ? '<span class="badge info">modelo inicial</span>' : `<button class="btn sm" data-act="modeloPadrao" data-id="${m.id}">Tornar inicial</button>`}
+          <a class="btn sm" href="#/fases/${m.id}">Editar fases</a>
+          <button class="icon-btn danger" data-act="delModelo" data-id="${m.id}" title="Excluir modelo">${I.trash}</button></div>`;
+      }).join('') : `<div class="list-item muted small">Nenhum modelo. Importe a planilha, crie um na aba <a href="#/fases">Fases</a> ou, numa obra, use Configurações › Salvar EAP como modelo.</div>`}</div>`;
 }
 
 /* ---------- Composições ---------- */
@@ -52,46 +133,48 @@ export function viewComposicoes() {
   const lib = store.lib();
   const f = ui.compFilter.trim().toLowerCase();
   const list = [...lib.composicoes].sort((a, b) => natural(a.codigo, b.codigo) || (b.versao - a.versao))
-    .filter((c) => !f || `${c.codigo} ${c.descricao}`.toLowerCase().includes(f));
+    .filter((c) => !f || `${c.codigo} ${c.descricao} ${c.etapaEap || ''} ${c.refSinapi || ''} ${c.fonte}`.toLowerCase().includes(f));
   const cards = list.map((c) => {
     const erros = validarComposicao(c);
     const uso = usoComp(c.id);
-    const L = liderDe(c);
     return `<div class="card comp-card2${c.ativa ? '' : ' inativa'}">
       <div class="comp-top">
         <input class="cell w-code" data-chg="compField" data-f="codigo" data-id="${c.id}" data-key="cc:${c.id}" value="${esc(c.codigo)}" placeholder="Código">
         <input class="cell" style="flex:1;min-width:180px" data-chg="compField" data-f="descricao" data-id="${c.id}" data-key="cd:${c.id}" value="${esc(c.descricao)}" placeholder="Descrição do serviço">
         <input class="cell w-un" list="unidades" data-chg="compField" data-f="unidade" data-id="${c.id}" value="${esc(c.unidade)}" title="Unidade">
         <select class="cell w-fonte" data-chg="compField" data-f="fonte" data-id="${c.id}" title="Fonte">${FONTES.map((x) => `<option ${x === c.fonte ? 'selected' : ''}>${x}</option>`).join('')}</select>
+        <input class="cell w-code" data-chg="compField" data-f="refSinapi" data-id="${c.id}" value="${esc(c.refSinapi || '')}" placeholder="Ref. SINAPI" title="Código SINAPI de referência">
         <span class="badge ${c.ativa ? 'info' : ''}" title="Versão">v${c.versao || 1}${c.ativa ? '' : ' · inativa'}</span>
         ${uso ? `<span class="badge" title="Obras que usam">${uso} obra${uso > 1 ? 's' : ''}</span>` : ''}
         ${erros.length ? `<span class="badge crit">${esc(erros.join(' · '))}</span>` : ''}
       </div>
       <table class="data mo">
-        <thead><tr><th>Função (mão de obra)</th><th class="num">Coef. (h/${esc(c.unidade)})</th><th title="A função líder define o prazo">Líder</th><th class="num">Produção da equipe líder</th><th></th></tr></thead>
+        <thead><tr><th>Função (mão de obra)</th><th class="num">Coef. (h/${esc(c.unidade)})</th><th title="A função líder define o prazo">Líder</th><th class="num">Produção da função líder</th><th></th></tr></thead>
         <tbody>${c.maoObra.map((m) => `<tr>
           <td><input class="cell" data-chg="moField" data-f="funcao" data-c="${c.id}" data-id="${m.id}" value="${esc(m.funcao)}"></td>
           <td><input class="cell w-num" inputmode="decimal" data-chg="moField" data-f="coef" data-c="${c.id}" data-id="${m.id}" value="${fmtIn(m.coef, 4)}"></td>
           <td><input type="radio" name="lider-${c.id}" data-chg="moLider" data-c="${c.id}" data-id="${m.id}" ${m.lider ? 'checked' : ''} aria-label="Função líder"></td>
-          <td class="num small muted">${m.lider && m.coef > 0 ? `≈ ${fmtNum(8.8 * 0.85 / m.coef, 2)} ${esc(c.unidade)}/dia por profissional` : ''}</td>
+          <td class="num small muted">${m.lider && m.coef > 0 ? `≈ ${fmtNum(8 * 0.85 / m.coef, 2)} ${esc(c.unidade)}/dia por profissional` : ''}</td>
           <td><button class="icon-btn danger" data-act="moExcluir" data-c="${c.id}" data-id="${m.id}" title="Remover função">${I.trash}</button></td></tr>`).join('')}</tbody>
       </table>
       <div class="row" style="padding:8px 12px">
         <button class="btn sm" data-act="moNova" data-c="${c.id}">${I.plus} Função</button>
         <button class="btn sm" data-act="compVersao" data-id="${c.id}" title="Cria uma cópia com versão nova (a atual fica inativa)">Nova versão</button>
+        <button class="btn sm" data-act="compDuplicar" data-id="${c.id}" title="Cria uma composição própria a partir desta (ex.: ajustar um coeficiente do SINAPI)">${I.copy} Duplicar como própria</button>
         ${!c.ativa ? `<button class="btn sm" data-act="compAtivar" data-id="${c.id}">Tornar ativa</button>` : ''}
-        <span style="flex:1"></span>
-        <input class="cell" style="max-width:320px" data-chg="compField" data-f="obs" data-id="${c.id}" value="${esc(c.obs || '')}" placeholder="Observação / referência">
+        <input class="cell" style="max-width:190px" data-chg="compField" data-f="etapaEap" data-id="${c.id}" value="${esc(c.etapaEap || '')}" placeholder="Etapa da EAP" title="Etapa da EAP">
+        <input class="cell" style="flex:1;min-width:160px" data-chg="compField" data-f="obs" data-id="${c.id}" value="${esc(c.obs || '')}" placeholder="Observação / ação">
         <button class="icon-btn danger" data-act="compExcluir" data-id="${c.id}" title="Excluir composição">${I.trash}</button>
       </div>
     </div>`;
   }).join('');
-  return `<div class="page-head"><div><h1>Composições</h1><div class="muted">Coeficientes de mão de obra por função (h/unidade). A função líder define a duração.</div></div>
-    <div class="row"><label class="btn">${I.upload} Importar da planilha<input type="file" accept=".xlsx,.xls" data-chg="compImportar" hidden></label><button class="btn primary" data-act="compNova">${I.plus} Nova composição</button></div></div>
+  return `<div class="page-head"><div><h1>Composições</h1><div class="muted">Coeficientes de mão de obra por função (h/unidade). A função líder define a duração. Tudo editável.</div></div>
+    <div class="row"><label class="btn">${I.upload} Importar da planilha<input type="file" accept=".xlsx,.xls" data-chg="compImportar" hidden></label><button class="btn primary" data-act="compNova">${I.plus} Composição própria</button></div></div>
+    <div class="tabs"><a href="#/composicoes" class="active">Minha biblioteca (${lib.composicoes.length})</a><a href="#/sinapi">Base SINAPI</a></div>
     <div class="stack">
-      <input data-inp="compFilter" data-key="compFilter" value="${esc(ui.compFilter)}" placeholder="Buscar por código ou descrição…">
+      <input data-inp="compFilter" data-key="compFilter" value="${esc(ui.compFilter)}" placeholder="Buscar por código, descrição, etapa, fonte ou ref. SINAPI…">
+      <div class="muted small">${lib.composicoes.length} composições. Prioridade de uso: Própria (validada por RDO) › SINAPI › SINAPI (família) › Própria (sugerida). Coeficientes SINAPI: registre mês de referência, UF e regime na observação.</div>
       ${cards || `<div class="card empty"><p>${f ? 'Nenhuma composição encontrada.' : 'Nenhuma composição cadastrada.'}</p></div>`}
-      <div class="muted small">Produção ≈ jornada 8,8 h × eficiência 0,85 ÷ coeficiente (referência; cada obra usa a própria jornada e eficiência). Coeficiente próprio (Obra própria / RDO) prevalece sobre SINAPI/TCPO — registre sempre a fonte.</div>
     </div>`;
 }
 
@@ -101,66 +184,110 @@ let importacao = null; // { arquivo, dados }
 export function viewImportar() {
   if (!importacao) {
     return `<div class="page-head"><div><a href="#/obras" class="muted small" style="text-decoration:none">← Obras</a><h1>Importar planilha</h1>
-      <div class="muted">Cria uma obra a partir do modelo de orçamento × cronograma (.xlsx)</div></div></div>
+      <div class="muted">Salva a planilha como modelo de EAP (e composições) para criar obras escolhendo as fases</div></div></div>
       <div class="card card-pad stack" style="max-width:760px">
-        <p style="margin:0">A planilha deve ter as abas <b>EAP Detalhada</b>, <b>Composicoes</b>, <b>Orcamento</b>, <b>Vinculo_Orc_EAP</b> e (opcional) <b>Duracao_Atividades</b> — as mesmas colunas do modelo.</p>
+        <p style="margin:0">A planilha deve ter as abas <b>EAP Detalhada</b> e <b>Composicoes</b> e, se quiser, <b>Orcamento</b>, <b>Vinculo_Orc_EAP</b> e <b>Duracao_Atividades</b> — as mesmas colunas do modelo.</p>
         <label class="btn primary" style="align-self:flex-start">${I.upload} Escolher arquivo .xlsx<input type="file" accept=".xlsx,.xls" data-chg="importarArquivo" hidden></label>
         <p class="muted small" style="margin:0">O arquivo é lido no seu navegador; nada é enviado para a internet além do seu Google Drive.</p>
       </div>`;
   }
   const d = importacao.dados;
-  const folhas = d.atividades.filter((a) => a.codigo.split('.').length >= 3).length;
+  const m = modeloDaPlanilha(d, 'x');
+  const etapas = etapasDoModelo(m);
+  const variantes = etapas.filter((e) => e.variante);
+  const lib = store.lib();
   return `<div class="page-head"><div><a href="#/obras" class="muted small" style="text-decoration:none">← Obras</a><h1>Importar planilha</h1><div class="muted">${esc(importacao.arquivo)}</div></div></div>
     <div class="stack" style="max-width:860px">
       <div class="kpis">
-        <div class="card kpi"><div class="k-label">Linhas da EAP</div><div class="k-value">${d.atividades.length}</div><div class="k-sub">${folhas} atividades de nível 3</div></div>
+        <div class="card kpi"><div class="k-label">Etapas</div><div class="k-value">${etapas.length}</div><div class="k-sub">${variantes.length ? `${variantes.length} alternativa(s)` : 'sem alternativas'}</div></div>
+        <div class="card kpi"><div class="k-label">Atividades (nível 3)</div><div class="k-value">${d.atividades.filter((a) => a.nivel >= 3).length}</div></div>
         <div class="card kpi"><div class="k-label">Composições</div><div class="k-value">${d.composicoes.length}</div></div>
-        <div class="card kpi"><div class="k-label">Itens do orçamento</div><div class="k-value">${d.orcamento.length}</div></div>
-        <div class="card kpi"><div class="k-label">Vínculos</div><div class="k-value">${d.vinculos.length}</div></div>
-        <div class="card kpi"><div class="k-label">Equipes/durações</div><div class="k-value">${d.duracoes.size}</div></div>
+        <div class="card kpi"><div class="k-label">Itens de orçamento</div><div class="k-value">${d.orcamento.length}</div><div class="k-sub">${d.vinculos.length} vínculos</div></div>
+        <div class="card kpi"><div class="k-label">Premissas</div><div class="k-value" style="font-size:18px">${fmtNum(d.premissas.jornada || 8.8)} h · ${fmtNum((d.premissas.eficiencia || 0.85) * 100)}%</div><div class="k-sub">jornada · eficiência</div></div>
       </div>
-      ${d.avisos.length ? `<div class="alert info"><b>Avisos da leitura</b><ul style="margin:6px 0 0;padding-left:18px">${d.avisos.map((a) => `<li>${esc(a)}</li>`).join('')}</ul></div>` : ''}
+      ${variantes.length ? `<div class="alert info">Alternativas de escopo encontradas: ${variantes.map((v) => `<b>${esc(v.codigo)}</b> ${esc(v.nome)}`).join('; ')}. Ao criar a obra você escolhe qual entra (só uma por etapa).</div>` : ''}
+      ${d.avisos.length ? `<div class="alert err"><b>Avisos da leitura</b><ul style="margin:6px 0 0;padding-left:18px">${d.avisos.map((a) => `<li>${esc(a)}</li>`).join('')}</ul></div>` : ''}
       <form class="card card-pad stack" id="formImport">
-        <div class="grid-form">
-          <label class="field">Nome da obra<input name="nome" required value="${esc(importacao.arquivo.replace(/\.xlsx?(\.xlsx?)?$/i, '').replace(/[_-]+/g, ' '))}"></label>
-          <label class="field">Data de início<input type="date" name="inicio" required value="${todayISO()}"></label>
-          <label class="field">Jornada (h/dia útil)<input name="jornada" inputmode="decimal" value="${fmtIn(d.premissas.jornada || 8.8, 2)}"></label>
-          <label class="field">Eficiência<input name="eficiencia" inputmode="decimal" value="${fmtIn(d.premissas.eficiencia || 0.85, 3)}"></label>
-        </div>
-        <label class="check"><input type="checkbox" name="modelo" checked> Salvar a EAP também como modelo (para novas obras)</label>
-        <div class="row"><button type="button" class="btn" data-act="importarCancelar">Cancelar</button><button type="button" class="btn primary" data-act="importarCriar">Criar obra</button></div>
+        <label class="field">Nome do modelo<input name="nome" required value="${esc(importacao.arquivo.replace(/\.xlsx?(\.xlsx?)?$/i, '').replace(/[_-]+/g, ' '))}"></label>
+        <label class="check"><input type="checkbox" name="padrao" ${!lib.modeloPadraoId || !(lib.modelosEAP || []).length ? 'checked' : 'checked'}> Usar como <b>modelo inicial</b> das novas obras</label>
+        <div class="muted small">As composições da planilha entram na biblioteca: mesmos coeficientes → aproveita (atualizando fonte, ref. SINAPI e etapa); coeficientes diferentes → nova versão.</div>
+        <div class="row"><button type="button" class="btn" data-act="importarCancelar">Cancelar</button>
+          <button type="button" class="btn" data-act="importarModelo">Salvar modelo</button>
+          <button type="button" class="btn primary" data-act="importarModeloObra">Salvar modelo e criar obra</button></div>
       </form>
-      <div class="muted small">Composições com o mesmo código e os mesmos coeficientes são reaproveitadas; se os coeficientes forem diferentes, é criada uma nova versão.</div>
     </div>`;
+}
+
+/** Cria uma obra a partir de um modelo, perguntando as fases. */
+async function criarObraDoModelo(m, nome, inicio) {
+  const r = await escolherFases(m, null);
+  if (!r) return null;
+  const lib = store.lib();
+  const o = novaObra({ nome, inicio });
+  if (m.premissas?.jornada > 0) o.jornada = m.premissas.jornada;
+  if (m.premissas?.eficiencia > 0) o.eficiencia = m.premissas.eficiencia;
+  const res = instanciarModelo(o, m, r.sel, { orcamento: r.orcamento, quantidades: r.quantidades }, lib);
+  store.addObra(o);
+  location.hash = `#/obra/${o.id}/atividades`;
+  if (res.avisos.length) setTimeout(() => info('Obra criada', `<p style="margin-top:0">${o.eap.length} itens na EAP, ${o.dependencias.length} predecessoras, ${o.orcamento.length} itens de orçamento.</p><details><summary>${res.avisos.length} aviso(s)</summary><ul class="small">${res.avisos.slice(0, 40).map((a) => `<li>${esc(a)}</li>`).join('')}</ul></details>`), 80);
+  return o;
 }
 
 /* ---------- ações ---------- */
 const comp = (id) => store.lib().composicoes.find((c) => c.id === id);
 
+async function salvarModeloImportado() {
+  const form = document.getElementById('formImport');
+  if (!form.reportValidity()) return null;
+  const v = Object.fromEntries(new FormData(form));
+  const lib = store.lib();
+  const { rel } = aplicarComposicoes(importacao.dados, lib);
+  const m = modeloDaPlanilha(importacao.dados, v.nome.trim());
+  lib.modelosEAP.push(m);
+  if (v.padrao || !lib.modeloPadraoId) lib.modeloPadraoId = m.id;
+  store.touch(lib);
+  importacao = null;
+  toast(`Modelo salvo. Composições: ${rel.novas} nova(s), ${rel.versoes} nova(s) versão(ões), ${rel.iguais} atualizada(s).`, 5000);
+  if (rel.conflitos.length) await info('Atenção nas composições', `<p>Mesmo código com descrição diferente — a da planilha virou nova versão (confira em Composições):</p><ul class="small">${rel.conflitos.map((c) => `<li>${esc(c)}</li>`).join('')}</ul>`);
+  return m;
+}
+
 export const acoesBiblioteca = {
   async newObra() {
     const lib = store.lib();
     const obras = store.obras();
-    const opcoes = [{ value: '', label: 'EAP vazia' }, ...(lib.modelosEAP || []).map((m) => ({ value: `m:${m.id}`, label: `Modelo: ${m.nome}` })), ...obras.map((o) => ({ value: `o:${o.id}`, label: `Cópia da obra: ${o.nome}` }))];
-    const v = await formDialog({ title: 'Nova obra', ok: 'Criar obra', fields: [
+    const modelos = lib.modelosEAP || [];
+    const pad = modelos.find((m) => m.id === lib.modeloPadraoId);
+    const opcoes = [
+      ...(pad ? [{ value: `m:${pad.id}`, label: `★ Modelo inicial: ${pad.nome} (escolher fases)` }] : []),
+      ...modelos.filter((m) => m !== pad).map((m) => ({ value: `m:${m.id}`, label: `Modelo: ${m.nome} (escolher fases)` })),
+      { value: '', label: 'EAP vazia' },
+      ...obras.map((o) => ({ value: `o:${o.id}`, label: `Cópia da obra: ${o.nome}` })),
+    ];
+    const v = await formDialog({ title: 'Nova obra', ok: 'Continuar', fields: [
       { name: 'nome', label: 'Nome da obra', required: true, placeholder: 'ex.: Residência Silva' },
       { name: 'inicio', label: 'Data de início', type: 'date', required: true, value: todayISO() },
-      { name: 'base', label: 'Começar com', type: 'select', value: '', options: opcoes },
+      { name: 'base', label: 'Começar com', type: 'select', value: opcoes[0].value, options: opcoes },
     ] });
     if (!v) return;
+    if (v.base.startsWith('m:')) return criarObraDoModelo(modelos.find((m) => m.id === v.base.slice(2)), v.nome.trim(), v.inicio);
     let o;
     if (v.base.startsWith('o:')) { o = store.duplicateObra(store.obra(v.base.slice(2)), v.nome.trim()); o.inicio = v.inicio; store.touch(o); }
-    else {
-      o = novaObra({ nome: v.nome.trim(), inicio: v.inicio });
-      if (v.base.startsWith('m:')) aplicarModelo(o, lib.modelosEAP.find((m) => m.id === v.base.slice(2)));
-      store.addObra(o);
-    }
+    else o = store.addObra(novaObra({ nome: v.nome.trim(), inicio: v.inicio }));
     location.hash = `#/obra/${o.id}/atividades`;
+  },
+  modeloPadrao(d) { const lib = store.lib(); lib.modeloPadraoId = d.id; commit(lib); toast('Modelo inicial definido.'); },
+  async modeloRenomear(d) {
+    const lib = store.lib(); const m = lib.modelosEAP.find((x) => x.id === d.id);
+    const v = await formDialog({ title: 'Renomear modelo', fields: [{ name: 'nome', label: 'Nome', required: true, value: m.nome }] });
+    if (!v) return; m.nome = v.nome.trim(); commit(lib);
   },
   async delModelo(d) {
     const lib = store.lib(); const m = lib.modelosEAP.find((x) => x.id === d.id);
-    if (!(await ask(`Excluir o modelo "${m.nome}"? As obras criadas com ele não mudam.`, 'Excluir'))) return;
-    lib.modelosEAP = lib.modelosEAP.filter((x) => x.id !== d.id); commit(lib);
+    if (!(await ask(`Excluir o modelo "${m.nome}"? As obras criadas com ele não mudam, mas não será mais possível adicionar fases dele.`, 'Excluir'))) return;
+    lib.modelosEAP = lib.modelosEAP.filter((x) => x.id !== d.id);
+    if (lib.modeloPadraoId === d.id) lib.modeloPadraoId = lib.modelosEAP[0]?.id || null;
+    commit(lib);
   },
 
   // Composições
@@ -190,6 +317,21 @@ export const acoesBiblioteca = {
     commit(lib);
     toast(`Versão ${nova.versao} criada. Itens de orçamento existentes continuam na versão que usavam.`, 4500);
   },
+  async compDuplicar(d) {
+    const lib = store.lib(); const c = comp(d.id);
+    const nums = lib.composicoes.map((x) => x.codigo.match(/^P(\d+)$/)?.[1]).filter(Boolean).map(Number);
+    const v = await formDialog({ title: 'Duplicar como composição própria', ok: 'Criar', fields: [
+      { name: 'codigo', label: 'Código', required: true, value: `P${String((nums.length ? Math.max(...nums) : 0) + 1).padStart(3, '0')}` },
+      { name: 'descricao', label: 'Descrição', required: true, value: c.descricao },
+    ] });
+    if (!v) return;
+    const nova = { ...JSON.parse(JSON.stringify(c)), id: uid(), codigo: v.codigo.trim(), descricao: v.descricao.trim(), fonte: 'Própria (sugerida)', versao: 1, ativa: true,
+      obs: [c.refSinapi ? `baseada no SINAPI ${c.refSinapi}` : `baseada em ${c.codigo}`, c.obs].filter(Boolean).join(' · ') };
+    nova.maoObra.forEach((m) => { m.id = uid(); });
+    lib.composicoes.push(nova);
+    ui.compFilter = nova.codigo; ui.pendingFocus = `cd:${nova.id}`;
+    commit(lib);
+  },
   compAtivar(d) { const lib = store.lib(); const c = comp(d.id); lib.composicoes.filter((x) => x.codigo === c.codigo).forEach((x) => { x.ativa = x.id === c.id; }); commit(lib); },
   async compExcluir(d) {
     const lib = store.lib(); const c = comp(d.id); const uso = usoComp(d.id);
@@ -200,27 +342,17 @@ export const acoesBiblioteca = {
 
   // Importação
   importarCancelar() { importacao = null; queueRender(); },
-  async importarCriar() {
-    const form = document.getElementById('formImport');
-    if (!form.reportValidity()) return;
-    const v = Object.fromEntries(new FormData(form));
-    const lib = store.lib();
-    const d = importacao.dados;
-    d.premissas.jornada = parseNum(v.jornada) || d.premissas.jornada;
-    d.premissas.eficiencia = parseNum(v.eficiencia) || d.premissas.eficiencia;
-    const { obra, avisos, rel } = criarObraImportada(d, { nome: v.nome.trim(), inicio: v.inicio }, lib);
-    if (v.modelo) lib.modelosEAP.push(modeloDaEAP(`EAP ${v.nome.trim()}`, d.atividades));
-    store.touch(lib);
-    store.addObra(obra);
-    importacao = null;
-    location.hash = `#/obra/${obra.id}/atividades`;
-    const calc = calcular(obra, lib);
-    await info('Obra importada', `<p style="margin-top:0"><b>${obra.eap.length}</b> itens na EAP, <b>${obra.orcamento.length}</b> itens de orçamento, <b>${obra.vinculos.length}</b> vínculos e <b>${obra.dependencias.length}</b> predecessoras.</p>
-      <p>Composições: ${rel.novas} nova(s), ${rel.versoes} nova(s) versão(ões), ${rel.iguais} reaproveitada(s).</p>
-      ${rel.conflitos?.length ? `<div class="alert err small">Mesmo código com descrição diferente (a da planilha virou nova versão — confira em Composições): ${rel.conflitos.map(esc).join('; ')}</div>` : ''}
-      <p>Total do orçamento: <b>${fmtBRL(calc.totalOrcamento)}</b> · alocado na EAP: <b>${fmtBRL(calc.totalAlocado)}</b>.</p>
-      <p><b>${calc.alertasAtiv}</b> atividades com alerta (a maioria por estar sem duração definida — usam a duração padrão do tipo até você preencher). Use o filtro "Só com alertas" na aba Atividades.</p>
-      ${avisos.length ? `<details><summary>${avisos.length} aviso(s)</summary><ul class="small">${avisos.slice(0, 50).map((a) => `<li>${esc(a)}</li>`).join('')}</ul></details>` : ''}`);
+  async importarModelo() { const m = await salvarModeloImportado(); if (m) { location.hash = '#/obras'; queueRender(); } },
+  async importarModeloObra() {
+    const m = await salvarModeloImportado();
+    if (!m) return;
+    queueRender();
+    const v = await formDialog({ title: 'Nova obra', ok: 'Escolher fases', text: `A partir do modelo "${m.nome}".`, fields: [
+      { name: 'nome', label: 'Nome da obra', required: true }, { name: 'inicio', label: 'Data de início', type: 'date', required: true, value: todayISO() },
+    ] });
+    if (!v) { location.hash = '#/obras'; return; }
+    const o = await criarObraDoModelo(m, v.nome.trim(), v.inicio);
+    if (!o) location.hash = '#/obras';
   },
 };
 
@@ -245,7 +377,7 @@ export const mudancasBiblioteca = {
       const lib = store.lib();
       const { rel } = aplicarComposicoes(dados, lib);
       commit(lib);
-      toast(`Composições: ${rel.novas} nova(s), ${rel.versoes} nova(s) versão(ões), ${rel.iguais} já existente(s).`, 5000);
+      toast(`Composições: ${rel.novas} nova(s), ${rel.versoes} nova(s) versão(ões), ${rel.iguais} atualizada(s).`, 5000);
     } catch (e) { toast('Erro ao ler a planilha: ' + e.message, 5000); }
     el.value = '';
   },

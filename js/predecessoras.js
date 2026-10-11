@@ -10,14 +10,15 @@
 //   "-", "—" ou vazio  → sem predecessora
 //   texto ("Retomada") → sem dependência; vira observação e pede início fixado
 
-const GRUPO = /^(\d+(?:\.\d+)*(?:\s*\/\s*\d+(?:\.\d+)*)*)\s*(?:(II|TI|SS|FS|TT|IT)\b)?\s*([+-]\s*\d+)?$/i;
+// código: 3.2, 11B.9.5 (variante de escopo com letra)
+const GRUPO = /^(\d+[A-Z]?(?:\.\d+)*(?:\s*\/\s*\d+[A-Z]?(?:\.\d+)*)*)\s*(?:(II|TI|SS|FS|TT|IT)\b)?\s*([+-]\s*\d+)?$/;
 
 export function parseNotacao(texto) {
   const t = String(texto ?? '').replace(/\(orig\.?\)/i, '').trim();
   if (!t || /^[-–—]+$/.test(t)) return { deps: [], obs: '', textoLivre: false };
   const deps = [];
   for (const parte of t.split(';').map((s) => s.trim()).filter(Boolean)) {
-    const m = parte.replace(/\s+/g, ' ').match(GRUPO);
+    const m = parte.replace(/\s+/g, ' ').toUpperCase().match(GRUPO);
     if (!m) {
       if (!/\d/.test(parte)) return { deps: [], obs: `Predecessora original: "${t}"`, textoLivre: true };
       throw new Error(`"${parte}" não é uma predecessora válida. Use 3.2, 3.2 TI-10, 3.1 II+5 ou 6.1/6.2 TI-5.`);

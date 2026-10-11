@@ -6,6 +6,8 @@ import { todayISO } from './schedule.js';
 import { esc, ui, toast, ask, setRenderer, queueRender } from './ui.js';
 import { viewObra, acoesObra, mudancasObra, entradasObra, depoisObra } from './obra.js';
 import { viewObras, viewComposicoes, viewImportar, acoesBiblioteca, mudancasBiblioteca, entradasBiblioteca } from './biblioteca.js';
+import { viewFases, acoesFases, mudancasFases, entradasFases } from './fases.js';
+import { viewSinapi, acoesSinapi, mudancasSinapi, entradasSinapi, depoisSinapi } from './sinapi.js';
 
 /* ---------- acesso (login com Google + lista de contas autorizadas) ---------- */
 let authorized = false;
@@ -21,14 +23,11 @@ async function isAllowed(email) {
 const $view = document.getElementById('view');
 const $sync = document.getElementById('sync');
 
-const LOGO_MARK = (stroke = '#fff') => `<svg class="logo-mark" viewBox="0 0 300 420" aria-hidden="true"><g fill="none" stroke="${stroke}" stroke-width="26"><polyline points="20,420 20,226 125,164"/><polyline points="133,160 133,98 257,25 257,240"/></g><polygon fill="${stroke}" points="120,170 194,127 194,420 120,420"/><polygon fill="#d8b7a3" points="222,192 300,238 300,420 222,420"/></svg>`;
 
 function renderGate(error = '') {
   document.body.classList.add('locked');
   document.getElementById('gate').innerHTML = `<div class="gate-card">
-    ${LOGO_MARK()}
-    <div class="gate-name">GEPLAN</div>
-    <div class="gate-tag">GESTÃO E PLANEJAMENTO DE OBRAS</div>
+    <div class="gate-logo"><img src="icons/logo-full.png" alt="GEPLAN – Gestão e Planejamento de Obras"></div>
     <p class="gate-slogan">Da estratégia à execução</p>
     <button class="gate-btn" id="gateLogin" type="button">
       <svg viewBox="0 0 48 48" width="20" height="20" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.6 13.3l7.9 6.1C12.4 13.7 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.7 6c4.5-4.2 6.9-10.3 6.9-17.7z"/><path fill="#FBBC05" d="M10.5 28.6c-.5-1.4-.8-3-.8-4.6s.3-3.2.8-4.6l-7.9-6.1C1 16.6 0 20.2 0 24s1 7.4 2.6 10.7l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.7-6c-2.2 1.5-5 2.3-8.2 2.3-6.3 0-11.6-4.2-13.5-10l-7.9 6.1C6.6 42.6 14.6 48 24 48z"/></svg>
@@ -67,7 +66,8 @@ async function login() {
 function parseRoute() {
   const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
   if (parts[0] === 'obra' && parts[1]) return { name: 'obra', id: parts[1], tab: parts[2] || 'atividades' };
-  if (['composicoes', 'drive', 'importar'].includes(parts[0])) return { name: parts[0] };
+  if (parts[0] === 'fases') return { name: 'fases', id: parts[1] };
+  if (['composicoes', 'drive', 'importar', 'sinapi'].includes(parts[0])) return { name: parts[0] };
   return { name: 'obras' };
 }
 
@@ -84,13 +84,15 @@ function render() {
   let html;
   if (route.name === 'obra') html = viewObra(route);
   else if (route.name === 'composicoes') html = viewComposicoes();
+  else if (route.name === 'sinapi') html = viewSinapi();
+  else if (route.name === 'fases') html = viewFases(route);
   else if (route.name === 'importar') html = viewImportar();
   else if (route.name === 'drive') html = viewDrive();
   else html = viewObras();
   $view.innerHTML = html;
 
   document.querySelectorAll('[data-nav]').forEach((a) => {
-    a.classList.toggle('active', a.dataset.nav === route.name || (a.dataset.nav === 'obras' && ['obra', 'importar'].includes(route.name)));
+    a.classList.toggle('active', a.dataset.nav === route.name || (a.dataset.nav === 'obras' && route.name === 'obra') || (a.dataset.nav === 'composicoes' && route.name === 'sinapi'));
   });
   if (focusKey) {
     const el = $view.querySelector(`[data-key="${CSS.escape(focusKey)}"]`);
@@ -104,6 +106,7 @@ function render() {
   const tw = document.querySelector('.tree-wrap');
   if (tw && scrollTree) tw.scrollLeft = scrollTree;
   if (route.name === 'obra') depoisObra(route, scrollGantt);
+  if (route.name === 'sinapi') depoisSinapi();
 }
 setRenderer(render);
 
@@ -193,9 +196,9 @@ const mudancasGerais = {
 };
 
 /* ---------- eventos ---------- */
-const acoes = { ...acoesGerais, ...acoesBiblioteca, ...acoesObra };
-const mudancas = { ...mudancasGerais, ...mudancasBiblioteca, ...mudancasObra };
-const entradas = { ...entradasBiblioteca, ...entradasObra };
+const acoes = { ...acoesGerais, ...acoesBiblioteca, ...acoesObra, ...acoesFases, ...acoesSinapi };
+const mudancas = { ...mudancasGerais, ...mudancasBiblioteca, ...mudancasObra, ...mudancasFases, ...mudancasSinapi };
+const entradas = { ...entradasBiblioteca, ...entradasObra, ...entradasFases, ...entradasSinapi };
 
 $view.addEventListener('click', (e) => {
   const el = e.target.closest('[data-act]');

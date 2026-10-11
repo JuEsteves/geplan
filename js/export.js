@@ -64,9 +64,11 @@ export async function exportPDF(o, c, linhas) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const W = 297, H = 210, M = 10;
+  let logo = null;
+  try { const b = await fetch('icons/logo-full.png').then((r) => r.blob()); logo = await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(b); }); } catch {}
   const header = (title) => {
     doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.setTextColor(20, 48, 90);
-    doc.text('GEPLAN', W - M, M + 4, { align: 'right' });
+    if (logo) doc.addImage(logo, 'PNG', W - M - 46, M - 3, 46, 11); else doc.text('GEPLAN', W - M, M + 4, { align: 'right' });
     doc.text(title, M, M + 4);
     doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(90);
     doc.text(`${o.nome}  •  Início ${fmtBR(c.cron.inicio)}  •  Término ${fmtBR(c.cron.termino)}  •  ${c.cron.durTotal} dias úteis  •  Emitido em ${fmtBR(todayDay())}`, M, M + 10);

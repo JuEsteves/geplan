@@ -9,7 +9,8 @@ import { filhosDe, renumerar, novaAtividade, novoItem, novaComposicao, TIPOS, DU
 import { toDay, fmtBR, isoBR, todayDay, todayISO, fmtNum, fmtNumFix, fmtBRL, dateParts, MESES, weekday, feriadosNacionais } from './schedule.js';
 import { esc, I, ui, toast, formDialog, ask, info, commit, queueRender, parseNum, fmtIn } from './ui.js';
 import { exportExcel, exportPDF } from './export.js';
-import { modeloDaEAP } from './importador.js';
+import { modeloDaObra, instanciarModelo } from './importador.js';
+import { escolherFases } from './biblioteca.js';
 
 export const TABS = [
   ['orcamento', 'Orçamento'], ['vinculos', 'Vínculos'], ['atividades', 'Atividades'], ['gantt', 'Gantt'],
@@ -288,6 +289,7 @@ function tabAtividades(c) {
       <div class="seg"><button data-act="expNivel" data-n="1">Etapas</button><button data-act="expNivel" data-n="2">Subetapas</button><button data-act="expNivel" data-n="9">Tudo</button></div>
     </div>
     <div class="row">
+      <button class="btn sm primary" data-act="atvFasesModelo">${I.plus} Fases do modelo</button>
       <button class="btn sm" data-act="atvNovaEtapa">${I.plus} Etapa</button>
       <button class="btn sm" data-act="exportXlsx">Exportar Excel</button>
       <button class="btn sm" data-act="exportPdf">Exportar PDF</button>
@@ -298,7 +300,7 @@ function tabAtividades(c) {
     ${o.eap.length ? `<div class="card table-wrap tree-wrap"><table class="data tree">
       <thead><tr><th>Código</th><th>Atividade</th><th>Tipo</th><th>Função líder</th><th class="num">HH</th><th>Equipe</th><th class="num" title="Duração calculada">Calc.</th><th title="Duração manual">Manual</th><th class="num" title="Duração adotada (dias úteis)">Dur.</th><th>Início</th><th>Término</th><th>Predecessoras</th><th class="num">Folga</th><th class="num">Custo</th>${temLB ? '<th class="num" title="Desvio do término em relação à linha de base (dias úteis)">LB</th>' : ''}<th></th><th></th></tr></thead>
       <tbody>${rows || `<tr><td colspan="17" class="muted">Nenhuma atividade com esse filtro.</td></tr>`}</tbody></table></div>`
-      : `<div class="card empty"><p>A obra ainda não tem EAP.</p><button class="btn primary" data-act="atvNovaEtapa">${I.plus} Criar a primeira etapa</button></div>`}
+      : `<div class="card empty"><p>A obra ainda não tem EAP.</p><div class="row" style="justify-content:center"><button class="btn primary" data-act="atvFasesModelo">${I.plus} Adicionar fases do modelo</button><button class="btn" data-act="atvNovaEtapa">${I.plus} Criar etapa do zero</button></div></div>`}
     <div class="muted small"><b>Duração</b> = ARRED.PARA.CIMA(HH ÷ (equipe × ${fmtNum(calc.jornada)} h × ${fmtNum(calc.eficiencia)})). A duração manual tem prioridade. Valores em <i class="prov">itálico</i> são provisórios (padrão do tipo).
     <b>Predecessoras:</b> <code class="k">3.2</code> término→início · <code class="k">3.2 TI-10</code> começa 10 dias úteis antes do fim · <code class="k">3.1 II+5</code> 5 dias após o início · <code class="k">6.1/6.2 TI-5</code> várias.</div>
   </div>`;
@@ -650,7 +652,7 @@ async function menuAtividade(o, a) {
     const form = dlg.querySelector('form');
     form.onsubmit = (e) => { e.preventDefault(); finish({ acao: 'salvar', vals: Object.fromEntries(new FormData(form)) }); };
     dlg.querySelectorAll('[data-r]').forEach((b) => { b.onclick = () => finish(b.dataset.r === 'cancel' ? null : { acao: b.dataset.r, vals: Object.fromEntries(new FormData(form)) }); });
-    dlg.oncancel = () => finish(null); dlg.onclose = () => finish(null);
+    dlg.oncancel = () => finish(null); dlg.onclose = () => { if (!dlg.open) finish(null); };
     dlg.showModal();
   });
   if (!r) return;
@@ -852,12 +854,35 @@ export const acoesObra = {
   delFeriadoGeral(d) { const lib = store.lib(); lib.feriadosGlobais = lib.feriadosGlobais.filter((f) => f.data !== d.d); commit(lib); },
   async salvarModelo() {
     const o = obraAtual();
-    const v = await formDialog({ title: 'Salvar EAP como modelo', ok: 'Salvar', text: 'O modelo guarda a estrutura, os tipos e as predecessoras, para criar novas obras.', fields: [{ name: 'nome', label: 'Nome do modelo', required: true, value: `EAP ${o.nome}` }] });
+    const v = await formDialog({ title: 'Salvar EAP como modelo', ok: 'Salvar', text: 'O modelo guarda a estrutura, os tipos, as predecessoras, as equipes e os itens de orçamento com os vínculos — para criar novas obras escolhendo as fases.', fields: [
+      { name: 'nome', label: 'Nome do modelo', required: true, value: `EAP ${o.nome}` },
+      { name: 'padrao', label: 'Usar como modelo inicial das novas obras', type: 'checkbox', value: false },
+    ] });
     if (!v) return;
     const c = contexto(o);
     const lib = store.lib();
-    lib.modelosEAP.push(modeloDaEAP(v.nome.trim(), o.eap.map((a) => ({ codigo: a.codigo, nivel: a.nivel, etapa: a.etapa, subetapa: a.subetapa, descricao: a.descricao, tipo: a.tipo, pred: c.predsTexto(a), equipe: a.equipe, duracaoManual: a.duracaoManual }))));
+    const m = modeloDaObra(v.nome.trim(), o, lib, c.predsTexto);
+    lib.modelosEAP.push(m);
+    if (v.padrao || !lib.modeloPadraoId) lib.modeloPadraoId = m.id;
     commit(lib); toast('Modelo salvo. Use-o ao criar uma nova obra.');
+  },
+  async atvFasesModelo() {
+    const o = obraAtual(); const lib = store.lib();
+    const modelos = lib.modelosEAP || [];
+    if (!modelos.length) return toast('Nenhum modelo ainda. Importe a planilha (menu Importar) ou salve a EAP de uma obra como modelo.', 5000);
+    const usado = modelos.find((m) => o.eap.some((a) => a.modeloId === m.id));
+    let m = usado || modelos.find((x) => x.id === lib.modeloPadraoId) || modelos[0];
+    if (modelos.length > 1) {
+      const v = await formDialog({ title: 'Adicionar fases', ok: 'Continuar', fields: [{ name: 'm', label: 'Modelo', type: 'select', value: m.id, options: modelos.map((x) => ({ value: x.id, label: `${x.id === lib.modeloPadraoId ? '★ ' : ''}${x.nome}` })) }] });
+      if (!v) return;
+      m = modelos.find((x) => x.id === v.m);
+    }
+    const r = await escolherFases(m, o);
+    if (!r) return;
+    const antes = o.eap.length;
+    const res = instanciarModelo(o, m, r.sel, { orcamento: r.orcamento, quantidades: r.quantidades }, lib);
+    commit(o);
+    toast(`${o.eap.length - antes} item(ns) adicionados à EAP${res.itens ? ` e ${res.itens} item(ns) ao orçamento` : ''}. Predecessoras religadas.`, 5000);
   },
   async dupObra() {
     const o = obraAtual();
@@ -913,11 +938,12 @@ export const mudancasObra = {
     const idPorCodigo = new Map(o.eap.map((x) => [x.codigo, x.id]));
     try {
       const r = resolverNotacao(el.value, a.id, idPorCodigo);
-      if (r.textoLivre) { a.predTexto = el.value.trim(); o.dependencias = o.dependencias.filter((x) => x.atividadeId !== a.id); toast('Predecessora em texto: defina o início fixado da atividade (menu ⋯).', 4500); return commit(o); }
+      if (r.textoLivre) { a.predManual = true; a.predTexto = el.value.trim(); o.dependencias = o.dependencias.filter((x) => x.atividadeId !== a.id); toast('Predecessora em texto: defina o início fixado da atividade (menu ⋯).', 4500); return commit(o); }
       const preds = r.deps.map((x) => x.predecessoraId);
       if (criaCiclo(o, a.id, preds)) throw new Error('Essa ligação cria uma dependência circular.');
       o.dependencias = o.dependencias.filter((x) => x.atividadeId !== a.id).concat(r.deps.map((x) => ({ id: uid(), atividadeId: a.id, ...x })));
       a.predTexto = '';
+      a.predManual = true;
       commit(o);
     } catch (e) { el.classList.add('invalid'); toast(e.message, 4500); }
   },

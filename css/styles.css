@@ -126,6 +126,27 @@ h3 { font-size: 14px; font-weight: 700; margin: 0; }
 .inicio-vazio p { max-width: 560px; margin: 0 auto 14px; }
 .inicio-vazio-ico .nav-ico { width: 40px; height: 40px; color: var(--accent); }
 .menu-fundo { display: none; }
+.kpis-6 { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+a.kpi-link { color: inherit; text-decoration: none; display: block; transition: border-color .15s; }
+a.kpi-link:hover { border-color: var(--accent); }
+.atalhos-grupo + .atalhos-grupo { margin-top: 10px; }
+.atalhos-grupo .nav-titulo { padding-left: 2px; }
+.atalho > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.atalho small { font-weight: 400; color: var(--text-2); font-size: 12px; line-height: 1.35; }
+.atalho .badge { margin-left: auto; font-size: 9.5px; padding: 1px 6px; flex: none; }
+.atalho-desc { align-items: flex-start; }
+.atalhos:has(.atalho-desc) { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+.atalho-off { opacity: .6; cursor: default; }
+.atalho-off:hover { border-color: var(--border); color: var(--text); }
+.obra-card { position: relative; }
+.obra-topo { display: flex; gap: 12px; align-items: flex-start; }
+.obra-capa {
+  width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; flex: none;
+  background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 17px;
+}
+.inicio-intro { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
+.passos { margin: 6px 0 0; padding-left: 20px; display: grid; gap: 6px; }
+.filtros-obras { gap: 8px; }
 main { flex: 1; min-width: 0; padding: 20px 24px 40px; max-width: 1400px; }
 .bottomnav { display: none; }
 

@@ -183,6 +183,10 @@ js/navegacao.js         menu por áreas (computador e celular) e seletor de obra
 js/inicio.js            Visão geral (página inicial) e Tarefas e pendências
 js/indicadores.js       indicadores por obra e consolidados (critérios de avanço, atraso, custo, pedidos e entregas)
 js/configuracoes.js     Administração › Configurações
+js/fornecedores.js      Fornecedores (modo nuvem): cadastro, busca, ficha, avaliações, documentos, histórico
+js/validacao.js         CPF/CNPJ, e-mail, UF e busca sem acento
+js/nuvem/arquivos.js    envio e links temporários de arquivos (Supabase Storage privado)
+docs/*.md               documentação por módulo e histórico de versões (as planilhas de docs/ não vão para o GitHub)
 js/nuvem/               modo nuvem: mapeamento app ↔ tabelas, sincronização, login, empresa
 supabase/               migrações SQL, planos iniciais, guia de configuração e simulador de testes
 sw.js, manifest.webmanifest, icons/   app instalável e offline

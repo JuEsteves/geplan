@@ -21,6 +21,19 @@ coeficientes de produtividade (h/unid). Fluxo:
 11. **Base SINAPI** (Composições › Base SINAPI) – a Caixa não tem API pública; importe a planilha analítica mensal (XLSX do ZIP por UF). A base fica no aparelho (IndexedDB), pesquisável; "Adicionar à biblioteca" cria a composição com as funções de mão de obra (itens em horas) e a líder sugerida. "Duplicar como própria" cria uma composição própria a partir de qualquer outra.
 9. **Variantes de escopo** – etapas com letra (ex.: 11B Piscina de fibra, alternativa à 11). Só uma por etapa entra na obra; predecessoras externas são trocadas automaticamente (17.1.1: 11.9.5 → 11B.9.5).
 
+## Navegação
+
+O menu lateral é organizado por áreas: **Visão geral** (página inicial), **Planejamento** (Obras, EAP e fases,
+Cronograma, Curva S), **Orçamento e custos** (Orçamentos, Composições, Medições, Custos previstos e realizados),
+**Execução e controle** (Diário de obra, Acompanhamento físico, Tarefas e pendências), **Suprimentos e documentos**
+(Compras e materiais; Fornecedores e Documentos aparecem como "em breve") e **Administração** (Google Drive e backup,
+ou Empresa/usuários/plano no modo nuvem). Os módulos que existem dentro de cada obra abrem um seletor de obra
+(ou vão direto, se houver uma só). No celular, o rodapé tem Início, Obras, Cronograma, Diário e **Menu** (todas as áreas).
+
+A **Visão geral** mostra obras ativas, avanço físico médio, atividades atrasadas, pendências do diário, custo
+realizado, as obras com situação do cronograma, atalhos e as pendências — tudo calculado com os dados salvos e pelas
+mesmas regras do painel de cada obra. Critérios documentados em `js/indicadores.js`.
+
 ## Gestão da obra (abas da obra)
 
 | Aba | O que faz |
@@ -159,6 +172,9 @@ js/export.js            exportação Excel/PDF
 js/ui.js, js/libs.js    componentes de tela e bibliotecas externas
 js/config.js            Client ID do Google, contas autorizadas e conexão do Supabase (URL + chave pública)
 js/permissoes.js        o que cada perfil pode alterar (só interface; quem decide é o banco)
+js/navegacao.js         menu por áreas (computador e celular) e seletor de obra dos módulos
+js/inicio.js            Visão geral (página inicial) e Tarefas e pendências
+js/indicadores.js       indicadores por obra e consolidados (critérios de avanço, atraso, custo)
 js/nuvem/               modo nuvem: mapeamento app ↔ tabelas, sincronização, login, empresa
 supabase/               migrações SQL, planos iniciais, guia de configuração e simulador de testes
 sw.js, manifest.webmanifest, icons/   app instalável e offline

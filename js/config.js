@@ -10,3 +10,13 @@ export const GOOGLE_CLIENT_ID = '591124863425-v1aauosv96fphp86531m8necih4qaf8i.a
 export const ALLOWED_EMAIL_HASHES = [
   '179943bef1b704fff7a6ff06760f16baef40f7fc9feecdca3ce5ab3154a26e76', // dona do sistema
 ];
+
+// ---------------------------------------------------------------------------------------------
+// Banco de dados na nuvem (Supabase). Enquanto estes dois campos estiverem vazios, o GEPLAN funciona como
+// antes (dados no aparelho + Google Drive). Preenchidos, passa a usar o banco: login por e-mail/Google,
+// empresas, convites, permissões e dados de todas as obras no Supabase (veja supabase/README.md).
+//
+// A URL e a chave "anon" (publishable) SÃO PÚBLICAS por natureza: vão para o navegador de qualquer forma.
+// A proteção dos dados vem das políticas RLS do banco. NUNCA coloque aqui a chave "service_role" (secreta).
+export const SUPABASE_URL = '';
+export const SUPABASE_ANON_KEY = '';

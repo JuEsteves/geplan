@@ -1,5 +1,6 @@
 // Telas gerais: Obras (lista, nova obra, modelos de EAP), Composições e Importar planilha.
 import * as store from './store.js';
+import { pode } from './permissoes.js';
 import { calcular, validarComposicao, liderDe } from './calculo.js';
 import { cronograma } from './cpm.js';
 import { avanco } from './curvaS.js';
@@ -111,10 +112,10 @@ export function viewObras() {
   }).join('');
   const modelos = lib.modelosEAP || [];
   return `<div class="page-head"><div><h1>Obras</h1><div class="muted">Orçamento, EAP, cronograma e Curva S de cada obra</div></div>
-    <div class="row"><a class="btn" href="#/importar">${I.upload} Importar planilha</a><button class="btn primary" data-act="newObra">${I.plus} Nova obra</button></div></div>
+    <div class="row">${pode('cadastro') ? `<a class="btn" href="#/importar">${I.upload} Importar planilha</a><button class="btn primary" data-act="newObra">${I.plus} Nova obra</button>` : ''}</div></div>
     ${list.length ? `<div class="obras-grid">${cards}</div>` : `<div class="card empty"><p>Nenhuma obra ainda.</p>
-      <p class="small">${modelos.length ? 'Crie uma obra a partir do modelo inicial e escolha as fases.' : 'Comece importando a planilha modelo — ela vira o modelo inicial para as próximas obras.'}</p>
-      <div class="row" style="justify-content:center"><a class="btn" href="#/importar">${I.upload} Importar planilha</a><button class="btn primary" data-act="newObra">${I.plus} Nova obra</button></div></div>`}
+      <p class="small">${!pode('cadastro') ? 'Nenhuma obra liberada para o seu perfil. Peça ao administrador da empresa para incluir você na equipe da obra.' : modelos.length ? 'Crie uma obra a partir do modelo inicial e escolha as fases.' : 'Comece importando a planilha modelo — ela vira o modelo inicial para as próximas obras.'}</p>
+      <div class="row" style="justify-content:center">${pode('cadastro') ? `<a class="btn" href="#/importar">${I.upload} Importar planilha</a><button class="btn primary" data-act="newObra">${I.plus} Nova obra</button>` : ''}</div></div>`}
     <div class="card" style="margin-top:18px"><div class="card-pad" style="padding-bottom:6px"><h2>Modelos de EAP</h2><div class="muted small">Ao criar uma obra, você escolhe um modelo e as fases que entram. O modelo inicial (★) vem selecionado.</div></div>
       ${modelos.length ? modelos.map((m) => {
         const et = etapasDoModelo(m);
@@ -188,7 +189,7 @@ export function viewImportar() {
       <div class="card card-pad stack" style="max-width:760px">
         <p style="margin:0">A planilha deve ter as abas <b>EAP Detalhada</b> e <b>Composicoes</b> e, se quiser, <b>Orcamento</b>, <b>Vinculo_Orc_EAP</b> e <b>Duracao_Atividades</b> — as mesmas colunas do modelo.</p>
         <label class="btn primary" style="align-self:flex-start">${I.upload} Escolher arquivo .xlsx<input type="file" accept=".xlsx,.xls" data-chg="importarArquivo" hidden></label>
-        <p class="muted small" style="margin:0">O arquivo é lido no seu navegador; nada é enviado para a internet além do seu Google Drive.</p>
+        <p class="muted small" style="margin:0">O arquivo é lido no seu navegador; só o resultado (modelo, composições e obra) é salvo no armazenamento da sua conta.</p>
       </div>`;
   }
   const d = importacao.dados;

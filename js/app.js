@@ -9,6 +9,13 @@ import { viewObras, viewComposicoes, viewImportar, acoesBiblioteca, mudancasBibl
 import { viewFases, acoesFases, mudancasFases, entradasFases } from './fases.js';
 import { acoesGestao, mudancasGestao } from './gestao.js';
 import { viewSinapi, acoesSinapi, mudancasSinapi, entradasSinapi, depoisSinapi } from './sinapi.js';
+import { configurado as nuvemConfigurada } from './nuvem/supabase.js';
+import * as conta from './nuvem/conta.js';
+import * as nuvem from './nuvem/nuvem.js';
+import { viewEmpresa, acoesEmpresa, mudancasEmpresa, limparEmpresa } from './nuvem/telaEmpresa.js';
+
+// Modo nuvem (Supabase) quando js/config.js tiver URL e chave; senão, modo Google Drive (como antes).
+const NUVEM = nuvemConfigurada();
 
 /* ---------- acesso (login com Google + lista de contas autorizadas) ---------- */
 let authorized = false;
@@ -26,6 +33,7 @@ const $sync = document.getElementById('sync');
 
 
 function renderGate(error = '') {
+  if (NUVEM) return renderGateNuvem(gateModo, error);
   document.body.classList.add('locked');
   document.getElementById('gate').innerHTML = `<div class="gate-card">
     <div class="gate-logo"><img src="icons/logo-full.png" alt="GEPLAN – Gestão e Planejamento de Obras"></div>
@@ -63,9 +71,152 @@ async function login() {
   }
 }
 
+/* ---------- acesso no modo nuvem (Supabase Auth: e-mail/senha ou Google; empresas e convites) ---------- */
+let gateModo = 'entrar';
+let sessaoAtual = null;
+const LOGO = `<div class="gate-logo"><img src="icons/logo-full.png" alt="GEPLAN – Gestão e Planejamento de Obras"></div><p class="gate-slogan">Da estratégia à execução</p>`;
+const GOOGLE_SVG = '<svg viewBox="0 0 48 48" width="20" height="20" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.6 13.3l7.9 6.1C12.4 13.7 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.7 6c4.5-4.2 6.9-10.3 6.9-17.7z"/><path fill="#FBBC05" d="M10.5 28.6c-.5-1.4-.8-3-.8-4.6s.3-3.2.8-4.6l-7.9-6.1C1 16.6 0 20.2 0 24s1 7.4 2.6 10.7l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.7-6c-2.2 1.5-5 2.3-8.2 2.3-6.3 0-11.6-4.2-13.5-10l-7.9 6.1C6.6 42.6 14.6 48 24 48z"/></svg>';
+
+function renderGateNuvem(modo = 'entrar', msg = '', ok = '') {
+  gateModo = modo;
+  document.body.classList.add('locked');
+  const convite = sessionStorage.getItem('geplan:convite');
+  const aviso = `${msg ? `<div class="gate-error">${esc(msg)}</div>` : ''}${ok ? `<div class="gate-ok">${esc(ok)}</div>` : ''}`;
+  let corpo;
+  if (modo === 'carregando') corpo = `<p class="gate-note">${esc(msg || 'Carregando…')}</p>`;
+  else if (modo === 'empresa') {
+    corpo = `<p class="gate-note" style="margin-top:0">Olá${sessaoAtual?.user?.email ? `, ${esc(sessaoAtual.user.email)}` : ''}! Para começar, crie a sua empresa ou use o convite que recebeu.</p>
+      <form class="gate-form" data-gate="criarEmpresa"><input name="nome" placeholder="Nome da empresa (ou o seu nome, se for autônomo)" required minlength="2">
+        <button class="gate-btn primary" type="submit">Criar empresa</button></form>
+      <form class="gate-form" data-gate="convite"><input name="link" placeholder="Cole aqui o link do convite" required>
+        <button class="gate-btn" type="submit">Usar convite</button></form>
+      ${aviso}<p class="gate-note"><a href="#" data-gate-modo="sair">Sair</a></p>`;
+  } else if (modo === 'novaSenha') {
+    corpo = `<form class="gate-form" data-gate="novaSenha"><input type="password" name="senha" placeholder="Nova senha (mínimo 8 caracteres)" required minlength="8" autocomplete="new-password">
+      <button class="gate-btn primary" type="submit">Salvar nova senha</button></form>${aviso}`;
+  } else if (modo === 'recuperar') {
+    corpo = `<form class="gate-form" data-gate="recuperar"><input type="email" name="email" placeholder="E-mail da conta" required autocomplete="email">
+      <button class="gate-btn primary" type="submit">Enviar link para criar nova senha</button></form>${aviso}
+      <p class="gate-note"><a href="#" data-gate-modo="entrar">Voltar para entrar</a></p>`;
+  } else {
+    const cad = modo === 'cadastro';
+    corpo = `${convite ? `<div class="gate-ok">Você recebeu um convite. ${cad ? 'Crie a conta' : 'Entre'} com o e-mail convidado para aceitá-lo.</div>` : ''}
+      <form class="gate-form" data-gate="${cad ? 'cadastro' : 'entrar'}">
+        ${cad ? '<input name="nome" placeholder="Seu nome" required autocomplete="name">' : ''}
+        <input type="email" name="email" placeholder="E-mail" required autocomplete="email">
+        <input type="password" name="senha" placeholder="${cad ? 'Crie uma senha (mínimo 8 caracteres)' : 'Senha'}" required ${cad ? 'minlength="8" autocomplete="new-password"' : 'autocomplete="current-password"'}>
+        <button class="gate-btn primary" type="submit">${cad ? 'Criar conta' : 'Entrar'}</button>
+      </form>
+      <button class="gate-btn" type="button" data-gate-google>${GOOGLE_SVG} ${cad ? 'Criar conta' : 'Entrar'} com Google</button>
+      ${aviso}
+      <p class="gate-note">${cad ? '<a href="#" data-gate-modo="entrar">Já tenho conta</a>' : '<a href="#" data-gate-modo="cadastro">Criar conta</a> · <a href="#" data-gate-modo="recuperar">Esqueci a senha</a>'}</p>`;
+  }
+  document.getElementById('gate').innerHTML = `<div class="gate-card">${LOGO}${corpo}</div>`;
+}
+
+document.getElementById('gate').addEventListener('click', async (e) => {
+  if (!NUVEM) return;
+  const m = e.target.closest('[data-gate-modo]');
+  if (m) {
+    e.preventDefault();
+    if (m.dataset.gateModo === 'sair') { await conta.sair().catch(() => {}); sessaoAtual = null; return renderGateNuvem('entrar'); }
+    return renderGateNuvem(m.dataset.gateModo);
+  }
+  if (e.target.closest('[data-gate-google]')) {
+    try { await conta.entrarComGoogle(); } catch (err) { renderGateNuvem(gateModo, err.message); }
+  }
+});
+document.getElementById('gate').addEventListener('submit', async (e) => {
+  if (!NUVEM) return;
+  e.preventDefault();
+  const f = e.target, tipo = f.dataset.gate, v = Object.fromEntries(new FormData(f));
+  const btn = f.querySelector('button[type=submit]');
+  btn.disabled = true;
+  try {
+    if (tipo === 'entrar') { sessaoAtual = await conta.entrar(v.email, v.senha); await entrarNaEmpresa(); }
+    else if (tipo === 'cadastro') {
+      const r = await conta.cadastrar(v.email, v.senha, v.nome);
+      if (r.session) { sessaoAtual = r.session; await entrarNaEmpresa(); }
+      else renderGateNuvem('entrar', '', `Enviamos um link de confirmação para ${v.email}. Abra o link e depois entre aqui.`);
+    } else if (tipo === 'recuperar') {
+      await conta.recuperarSenha(v.email);
+      renderGateNuvem('entrar', '', 'Se o e-mail tiver cadastro, você vai receber um link para criar uma nova senha.');
+    } else if (tipo === 'novaSenha') {
+      await conta.novaSenha(v.senha); toast('Senha alterada.');
+      sessaoAtual = await conta.sessao(); await entrarNaEmpresa();
+    } else if (tipo === 'criarEmpresa') {
+      const id = await conta.criarEmpresa(v.nome); await entrarNaEmpresa(id);
+    } else if (tipo === 'convite') {
+      const token = String(v.link).trim().split('/').pop();
+      const id = await conta.aceitarConvite(token); toast('Convite aceito.'); await entrarNaEmpresa(id);
+    }
+  } catch (err) {
+    renderGateNuvem(gateModo, err.message);
+  }
+});
+
+/** Depois do login: aceita convite pendente, escolhe a empresa e carrega os dados dela. */
+async function entrarNaEmpresa(orgPreferida = null) {
+  sessaoAtual ||= await conta.sessao();
+  if (!sessaoAtual) return renderGateNuvem('entrar');
+  const user = sessaoAtual.user;
+  const email = (user.email || '').toLowerCase();
+  let msg = '';
+  const convite = sessionStorage.getItem('geplan:convite');
+  if (convite) {
+    sessionStorage.removeItem('geplan:convite');
+    try { orgPreferida = await conta.aceitarConvite(convite); toast('Convite aceito.'); } catch (e) { msg = e.message; }
+  }
+  let empresas, ultima = null;
+  try {
+    empresas = await conta.minhasEmpresas();
+    ultima = (await conta.perfil(user.id).catch(() => null))?.last_org_id;
+  } catch (e) {
+    // sem internet: continua com a última empresa usada neste aparelho
+    const salvo = nuvem.contextoSalvo();
+    if (salvo?.userId === user.id) empresas = [{ org_id: salvo.orgId, name: salvo.orgNome, role: salvo.papel }];
+    else return renderGateNuvem('entrar', e.message);
+  }
+  if (!empresas.length) return renderGateNuvem('empresa', msg);
+  const org = empresas.find((x) => x.org_id === orgPreferida) || empresas.find((x) => x.org_id === ultima) || empresas[0];
+  // outra conta usou este aparelho antes: não misturar os dados
+  if (store.meta.owner && store.meta.owner !== email) { nuvem.encerrar(); store.clearLocal(); }
+  store.meta.owner = email; store.saveMeta();
+  authorized = true;
+  limparEmpresa();
+  document.body.classList.remove('locked');
+  render();
+  try {
+    await nuvem.iniciar({ userId: user.id, email, orgId: org.org_id, orgNome: org.name, papel: org.role });
+    conta.lembrarEmpresa(user.id, org.org_id).catch(() => {});
+  } catch (e) { toast(`Não foi possível carregar os dados da empresa: ${e.message}. Mostrando a cópia deste aparelho.`, 6000); }
+  if (msg) toast(msg, 6000);
+  render();
+}
+
+async function sairNuvem() {
+  if (nuvem.pendente()) await nuvem.enviar().catch(() => {});
+  if (nuvem.pendente() && !(await ask('Há alterações que ainda NÃO foram enviadas para a nuvem e serão perdidas. Sair mesmo assim?', 'Sair'))) return;
+  await conta.sair().catch(() => {});
+  nuvem.encerrar(); store.clearLocal(); limparEmpresa();
+  sessaoAtual = null; authorized = false;
+  location.hash = '#/obras';
+  renderGateNuvem('entrar');
+}
+window.addEventListener('geplan:sair', () => sairNuvem().catch((e) => toast(e.message)));
+window.addEventListener('geplan:aviso', (e) => toast(e.detail, 7000));
+window.addEventListener('geplan:trocar-empresa', async (e) => {
+  await nuvem.enviar().catch(() => {});
+  if (nuvem.pendente() && !(await ask('Há alterações não enviadas nesta empresa. Trocar mesmo assim (elas serão perdidas)?', 'Trocar'))) return queueRender();
+  nuvem.encerrar(); store.clearLocal();
+  location.hash = '#/obras';
+  await entrarNaEmpresa(e.detail);
+});
+
 /* ---------- rotas ---------- */
 function parseRoute() {
   const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
+  if (parts[0] === 'convite' && parts[1]) return { name: 'convite', token: parts[1] };
   if (parts[0] === 'obra' && parts[1]) return { name: 'obra', id: parts[1], tab: parts[2] || 'atividades' };
   if (parts[0] === 'fases') return { name: 'fases', id: parts[1] };
   if (['composicoes', 'drive', 'importar', 'sinapi'].includes(parts[0])) return { name: parts[0] };
@@ -73,9 +224,16 @@ function parseRoute() {
 }
 
 function render() {
+  const route = parseRoute();
+  if (route.name === 'convite') {
+    if (!NUVEM) { location.hash = '#/obras'; return; }
+    sessionStorage.setItem('geplan:convite', route.token);
+    history.replaceState(null, '', location.pathname + location.search + '#/obras');
+    if (authorized) { entrarNaEmpresa().catch((e) => toast(e.message)); return; }
+    return renderGateNuvem(gateModo === 'carregando' ? 'carregando' : 'entrar');
+  }
   if (!authorized) return renderGate();
   document.body.classList.remove('locked');
-  const route = parseRoute();
   const ae = document.activeElement;
   const focusKey = ui.pendingFocus || (ae && $view.contains(ae) ? ae.dataset.key : null);
   const sel = ae && ae.dataset?.key === focusKey && 'selectionStart' in ae ? (() => { try { return [ae.selectionStart, ae.selectionEnd]; } catch { return null; } })() : null;
@@ -88,7 +246,7 @@ function render() {
   else if (route.name === 'sinapi') html = viewSinapi();
   else if (route.name === 'fases') html = viewFases(route);
   else if (route.name === 'importar') html = viewImportar();
-  else if (route.name === 'drive') html = viewDrive();
+  else if (route.name === 'drive') html = NUVEM ? viewEmpresa() : viewDrive();
   else html = viewObras();
   $view.innerHTML = html;
 
@@ -197,8 +355,8 @@ const mudancasGerais = {
 };
 
 /* ---------- eventos ---------- */
-const acoes = { ...acoesGerais, ...acoesBiblioteca, ...acoesObra, ...acoesFases, ...acoesSinapi, ...acoesGestao };
-const mudancas = { ...mudancasGerais, ...mudancasBiblioteca, ...mudancasObra, ...mudancasFases, ...mudancasSinapi, ...mudancasGestao };
+const acoes = { ...acoesGerais, ...acoesBiblioteca, ...acoesObra, ...acoesFases, ...acoesSinapi, ...acoesGestao, ...acoesEmpresa };
+const mudancas = { ...mudancasGerais, ...mudancasBiblioteca, ...mudancasObra, ...mudancasFases, ...mudancasSinapi, ...mudancasGestao, ...mudancasEmpresa };
 const entradas = { ...entradasBiblioteca, ...entradasObra, ...entradasFases, ...entradasSinapi };
 
 $view.addEventListener('click', (e) => {
@@ -230,6 +388,18 @@ $view.addEventListener('keydown', (e) => {
 
 /* ---------- indicador de sincronização ---------- */
 function renderSync() {
+  if (NUVEM) {
+    const st = nuvem.status;
+    const map = {
+      local: ['', 'Não conectado'], busy: ['busy', 'Sincronizando…'], ok: ['ok', 'Salvo na nuvem'],
+      pending: ['pending', 'Enviando…'], offline: ['pending', 'Offline'], error: ['err', 'Erro ao salvar'],
+    };
+    const [cls, label] = map[st.state] || map.local;
+    $sync.className = `sync ${cls}`;
+    $sync.title = st.message || '';
+    $sync.innerHTML = `<span class="dot"></span>${label}`;
+    return;
+  }
   const st = drive.status;
   const map = {
     local: ['', 'Só neste aparelho'], busy: ['busy', 'Sincronizando…'], ok: ['ok', 'Salvo no Drive'],
@@ -241,6 +411,7 @@ function renderSync() {
   $sync.innerHTML = `<span class="dot"></span>${label}`;
 }
 $sync.addEventListener('click', async (e) => {
+  if (NUVEM) return;
   if (drive.status.state === 'auth') {
     e.preventDefault();
     try { await drive.sync({ interactive: true }); } catch (err) { toast(err.message); }
@@ -248,11 +419,37 @@ $sync.addEventListener('click', async (e) => {
 });
 
 drive.onStatus(() => { renderSync(); if (parseRoute().name === 'drive') queueRender(); });
-window.addEventListener('planobras:remote-change', () => { queueRender(); toast('Dados atualizados a partir do Google Drive.'); });
+nuvem.onStatus(() => { renderSync(); if (parseRoute().name === 'drive') queueRender(); });
+window.addEventListener('planobras:remote-change', () => { queueRender(); if (!NUVEM) toast('Dados atualizados a partir do Google Drive.'); });
 window.addEventListener('hashchange', () => { window.scrollTo(0, 0); render(); });
+
+/** Início no modo nuvem: retoma a sessão salva (ou mostra o login). */
+async function iniciarNuvem() {
+  document.querySelectorAll('[data-nav="drive"]').forEach((a) => {
+    a.lastChild.textContent = 'Empresa';
+    a.title = 'Empresa, pessoas, plano e sincronização';
+  });
+  renderGateNuvem('carregando', 'Conectando…');
+  renderSync();
+  try {
+    await conta.aoMudarSessao((evento) => { if (evento === 'PASSWORD_RECOVERY') { authorized = false; renderGateNuvem('novaSenha', '', 'Crie a nova senha.'); } });
+    sessaoAtual = await conta.sessao();
+  } catch (e) { sessaoAtual = null; renderGateNuvem('entrar', e.message); return; }
+  // remove o código de login da barra de endereço (retorno do Google ou do e-mail)
+  const recuperando = new URLSearchParams(location.search).has('recuperar');
+  if (/[?&](code|error|recuperar)=?/.test(location.search)) history.replaceState(null, '', location.pathname + location.hash);
+  if (recuperando && sessaoAtual) return renderGateNuvem('novaSenha', '', 'Crie a nova senha.');
+  if (gateModo === 'novaSenha') return;
+  if (!sessaoAtual) return renderGateNuvem(parseRoute().name === 'convite' ? 'cadastro' : 'entrar');
+  await entrarNaEmpresa();
+}
 
 // Início: entra direto se esta conta já fez login neste aparelho e está autorizada
 (async () => {
+  if (NUVEM) {
+    if (parseRoute().name === 'convite') { sessionStorage.setItem('geplan:convite', parseRoute().token); history.replaceState(null, '', location.pathname + location.search + '#/obras'); }
+    return iniciarNuvem().catch((e) => renderGateNuvem('entrar', e.message));
+  }
   const u = drive.savedUser();
   authorized = drive.isConnected() && (await isAllowed(u?.emailAddress));
   if (!authorized && drive.isConnected()) { drive.disconnect(); store.clearLocal(); }

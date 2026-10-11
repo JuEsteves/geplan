@@ -96,6 +96,20 @@ export function putDoc(doc) {
   } else data.obras[doc.id] = migrateObra(doc, data.biblioteca);
   persist();
 }
+/** Modo nuvem: substitui a cópia de trabalho pelos dados baixados do banco (sem disparar envio). */
+export function carregarDaNuvem(lib, obras) {
+  data.biblioteca = migrateLib(lib);
+  data.obras = {};
+  for (const o of obras) data.obras[o.id] = migrateObra(o, data.biblioteca);
+  persist();
+}
+/** Inclui uma obra sem avisar os ouvintes (quem chama decide quando enviar). */
+export function addObraSilenciosa(o) {
+  data.obras[o.id] = migrateObra(o, data.biblioteca);
+  o.updatedAt = Date.now();
+  persist();
+}
+
 export function removeLocal(id) {
   delete data.obras[id];
   persist();

@@ -1,6 +1,7 @@
 // Telas da obra: Orçamento, Vínculos (orçamento × EAP), Atividades (EAP + cronograma), Gantt, Curva S,
 // Acompanhamento e Configurações.
 import * as store from './store.js';
+import { avisoDoPerfil } from './permissoes.js';
 import { calcular, fmtPct, liderDe } from './calculo.js';
 import { cronograma, criaCiclo } from './cpm.js';
 import { curvaS, avanco, fracPlanejada, curvaReal, incorridoAte } from './curvaS.js';
@@ -103,6 +104,7 @@ export function viewObra(route) {
         ${alertas ? `· <a href="#/obra/${o.id}/atividades" data-act="verAlertas" class="badge warn" style="text-decoration:none">${I.alert} ${alertas} alerta${alertas > 1 ? 's' : ''}</a>` : ''}
       </div></div></div>
     <nav class="tabs">${TABS.map(([k, l]) => `<a href="#/obra/${o.id}/${k}" class="${tab === k ? 'active' : ''}">${l}</a>`).join('')}</nav>
+    ${avisoDoPerfil()}
     ${c.cron.ciclo ? `<div class="alert err" style="margin-bottom:14px"><b>Dependência circular</b> entre ${c.cron.cicloIds.map((id) => c.codigoDe(id)).slice(0, 12).join(', ')}. Revise as predecessoras.</div>` : ''}
     ${body}`;
 }

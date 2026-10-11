@@ -5,7 +5,9 @@
 // As "tabelas" do sistema são coleções dentro destes documentos JSON (salvos no aparelho e no Google Drive).
 
 export const SCHEMA = 2;
-export const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+// UUID: o mesmo formato das chaves do banco (Supabase), para o registro ter um id só do aparelho à nuvem.
+export const uid = () => (globalThis.crypto?.randomUUID ? crypto.randomUUID()
+  : Date.now().toString(36) + Math.random().toString(36).slice(2, 8));
 
 export const TIPOS = ['Execução', 'Fornecedor/Compra', 'Espera técnica', 'Inspeção', 'Administrativo'];
 export const DURACAO_PADRAO = { 'Execução': 1, 'Fornecedor/Compra': 5, 'Espera técnica': 3, 'Inspeção': 1, 'Administrativo': 2 };

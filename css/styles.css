@@ -336,6 +336,9 @@ label.check { display: inline-flex; align-items: center; gap: 6px; cursor: point
 .alert { padding: 10px 14px; border-radius: 8px; border: 1px solid; font-size: 13px; }
 .alert.err { border-color: color-mix(in srgb, var(--crit) 40%, transparent); background: color-mix(in srgb, var(--crit) 8%, transparent); }
 .alert.info { border-color: color-mix(in srgb, var(--accent) 40%, transparent); background: var(--accent-soft); }
+.alert.warn { border-color: color-mix(in srgb, var(--warn) 45%, transparent); background: color-mix(in srgb, var(--warn) 9%, transparent); }
+table.custos-fase tr.sem-fase td { background: color-mix(in srgb, var(--warn) 7%, transparent); }
+table.custos-fase tfoot th { border-top: 2px solid var(--line, currentColor); }
 
 .empty { text-align: center; padding: 40px 16px; color: var(--text-2); }
 .empty p { margin: 0 0 14px; }

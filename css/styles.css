@@ -73,6 +73,12 @@ h3 { font-size: 14px; font-weight: 700; margin: 0; }
 .num { font-variant-numeric: tabular-nums; text-align: right; }
 .hidden { display: none !important; }
 
+/* Ambiente de testes (js/config.js): faixa fixa, não cobre botões */
+.faixa-teste { position: fixed; left: 50%; bottom: 10px; transform: translateX(-50%); z-index: 1000; pointer-events: none;
+  background: #b45309; color: #fff; font-size: 12px; font-weight: 700; letter-spacing: .04em; padding: 5px 14px; border-radius: 999px;
+  box-shadow: 0 2px 10px rgba(0,0,0,.25); white-space: nowrap; max-width: calc(100vw - 32px); overflow: hidden; text-overflow: ellipsis; }
+@media print { .faixa-teste { display: none; } }
+
 /* Layout */
 .topbar {
   position: sticky; top: 0; z-index: 30;

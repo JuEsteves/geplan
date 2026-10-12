@@ -108,7 +108,7 @@ pesos físicos, Curva S) e `js/cpm.js` (CPM). O banco repete as fórmulas de or�
 | Suíte | O que cobre | Resultado mais recente |
 |---|---|---|
 | `tests/index.html` | cálculo, CPM, curva, medições, BDI, custos, importações, indicadores, fornecedores, suprimentos, liberações, diário (RDO), medições por profissional e custos por fase | 98/98 |
-| `tests/db.html` | migrações em PostgreSQL real (PGlite), RLS entre empresas e perfis, integridade, limites do plano, auditoria, fornecedores, suprimentos (pedido com grupos), diário (RDO), medições por profissional, liberações por pessoa, custos por fase (banco = app), ida e volta da obra real da planilha pelo motor de sincronização | 141/141 |
+| `tests/db.html` | migrações em PostgreSQL real (PGlite), RLS entre empresas e perfis, integridade, limites do plano, auditoria, fornecedores, suprimentos (pedido com grupos), diário (RDO), medições por profissional, liberações por pessoa, custos por fase (banco = app), auditoria geral de segurança (RLS, políticas, anon, SECURITY DEFINER, views, Storage), ida e volta da obra real da planilha pelo motor de sincronização | 147/147 |
 | `tests/nuvem.html` | app real em modo nuvem contra emulador local do Supabase: cadastro, empresa, importar planilha, criar obra, editar orçamento, convite, perfil supervisor, medição, despesa, fornecedores, solicitação → cotação → pedido → entregas, liberações, recarregar sem cópia local, bloqueio de outra empresa | verificado pela tela (roteiro em `docs/SUPRIMENTOS.md`) |
 
 ## 7. Limitações conhecidas e riscos

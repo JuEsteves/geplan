@@ -43,15 +43,19 @@ const MODULOS = [
   ] },
   { grupo: 'Orçamento e custos', itens: [
     { r: 'Orçamentos', ico: 'orcamento', href: '#/modulo/orcamento', d: 'Itens, composições, BDI, revisões e importação do Excel.' },
-    { r: 'Medições', ico: 'medicoes', href: '#/modulo/medicoes', d: 'Avanço físico acumulado de cada atividade.' },
+    { r: 'Medições', ico: 'medicoes', href: nuvemConfigurada() ? '#/medicoes' : '#/modulo/medicoes', d: nuvemConfigurada() ? 'Boletins por atividade e profissional, aprovação e pagamento.' : 'Avanço físico acumulado de cada atividade.' },
     { r: 'Custos', ico: 'custos', href: '#/modulo/financeiro', d: 'Contratos, despesas e pagamentos sem duplicidade.' },
   ] },
   { grupo: 'Execução', itens: [
-    { r: 'Diário de obra', ico: 'diario', href: '#/modulo/diario', d: 'Clima, equipe, serviços e ocorrências do dia.' },
+    { r: 'Diário de obra', ico: 'diario', href: '#/diario', d: 'RDO por período, fotos e vídeos, aprovação com assinatura e PDF.' },
     { r: 'Tarefas e pendências', ico: 'tarefas', href: '#/pendencias', d: 'Atrasos e pendências de todas as obras.' },
   ] },
   { grupo: 'Suprimentos e documentos', itens: [
-    { r: 'Pedidos de compra', ico: 'compras', href: '#/modulo/compras', d: 'Pedidos registrados no Financeiro de cada obra.' },
+    ...(nuvemConfigurada() ? [
+      { r: 'Quadro de compras', ico: 'compras', href: '#/suprimentos', d: 'Pedidos com grupos de materiais, cotações e compras, por etapa.' },
+      { r: 'Entregas', ico: 'entregas', href: '#/suprimentos/entregas', d: 'Grupos comprados aguardando entrega ou retirada na obra.' },
+    ] : []),
+    { r: 'Compras no Financeiro', ico: 'custos', href: '#/modulo/compras', d: 'Compromissos de compra registrados no Financeiro de cada obra.' },
     { r: 'Fornecedores', ico: 'fornecedores', d: 'Cadastro central: contatos, condições, documentos e histórico.', ...(nuvemConfigurada() ? { href: '#/fornecedores' } : {}) },
     { r: 'Documentos', ico: 'documentos', d: 'Documentos, fotos e anexos das obras.' },
   ] },
@@ -120,7 +124,7 @@ function secoes(rs, limite) {
       'Nenhuma entrega atrasada ou prevista para os próximos 7 dias.'),
     cotacao: card('Pedidos aguardando cotação', cotacao.length, corta(cotacao).map(({ r, k }) => `<li><a href="#/obra/${r.o.id}/financeiro/compras">${pedido(k)}</a>${k.dataNecessaria ? ` <span class="muted small">necessário em ${isoBR(k.dataNecessaria)}</span>` : ''} ${nomeObra(r)}</li>`),
       'Nenhum pedido em cotação.'),
-    diario: card('Pendências do diário', pend.length, corta(pend).map(({ r, p }) => `<li><span class="badge warn">${esc(p.tipo)}</span> <a href="#/obra/${r.o.id}/diario">${esc(p.descricao)}</a> <span class="muted small">${isoBR(p.data)}</span> ${nomeObra(r)}</li>`),
+    diario: card('Pendências do diário', pend.length, corta(pend).map(({ r, p }) => `<li><span class="badge warn">${esc(p.tipo)}</span> <a href="#/diario/${r.o.id}/rdo/${p.diarioId}">${esc(p.descricao)}</a> <span class="muted small">${isoBR(p.data)}</span> ${nomeObra(r)}</li>`),
       'Nenhum impedimento ou interferência em aberto.', mais(pend.length)),
     proximas: card('Próximas atividades (14 dias)', proximas.length, corta(proximas).map(({ r, n }) => `<li><a href="#/obra/${r.o.id}/gantt"><b>${esc(n.a.codigo)}</b> ${esc(n.a.descricao)}</a> <span class="badge">${fmtBR(n.inicio)}</span> ${nomeObra(r)}</li>`),
       'Nenhuma atividade prevista para começar nos próximos 14 dias.', mais(proximas.length)),

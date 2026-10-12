@@ -17,6 +17,10 @@ import { renderMenu, viewModulo, MODULOS, obraUnica, linkModulo } from './navega
 import { viewInicio, viewPendencias, resumoDe, entradasInicio, mudancasInicio } from './inicio.js';
 import { viewConfiguracoes } from './configuracoes.js';
 import { viewFornecedores, viewFornecedor, acoesFornecedores, entradasFornecedores, mudancasFornecedores, limparFornecedores } from './fornecedores.js';
+import { viewSuprimentos, acoesSuprimentos, mudancasSuprimentos, entradasSuprimentos, limparSuprimentos } from './suprimentos.js';
+import { liberacoesDe } from './liberacoes.js';
+import { viewDiario, acoesDiario, mudancasDiario, entradasDiario, depoisDiario, limparDiario, formRdoSujo } from './diario.js';
+import { viewMedicoes, acoesMedicoes, mudancasMedicoes, entradasMedicoes, limparMedicoes } from './medicoes.js';
 
 // Modo nuvem (Supabase) quando js/config.js tiver URL e chave; senão, modo Google Drive (como antes).
 const NUVEM = nuvemConfigurada();
@@ -178,7 +182,7 @@ async function entrarNaEmpresa(orgPreferida = null) {
   } catch (e) {
     // sem internet: continua com a última empresa usada neste aparelho
     const salvo = nuvem.contextoSalvo();
-    if (salvo?.userId === user.id) empresas = [{ org_id: salvo.orgId, name: salvo.orgNome, role: salvo.papel }];
+    if (salvo?.userId === user.id) empresas = [{ org_id: salvo.orgId, name: salvo.orgNome, role: salvo.papel, liberacoes: salvo.liberacoes }];
     else return renderGateNuvem('entrar', e.message);
   }
   if (!empresas.length) return renderGateNuvem('empresa', msg);
@@ -191,7 +195,9 @@ async function entrarNaEmpresa(orgPreferida = null) {
   document.body.classList.remove('locked');
   render();
   try {
-    await nuvem.iniciar({ userId: user.id, email, orgId: org.org_id, orgNome: org.name, papel: org.role });
+    // liberações por pessoa (banco); sem resposta, usa as guardadas ou o padrão do perfil
+    const liberacoes = await conta.minhasLiberacoes(org.org_id).catch(() => org.liberacoes || liberacoesDe(org.role));
+    await nuvem.iniciar({ userId: user.id, email, orgId: org.org_id, orgNome: org.name, papel: org.role, liberacoes });
     conta.lembrarEmpresa(user.id, org.org_id).catch(() => {});
   } catch (e) { toast(`Não foi possível carregar os dados da empresa: ${e.message}. Mostrando a cópia deste aparelho.`, 6000); }
   if (msg) toast(msg, 6000);
@@ -202,7 +208,7 @@ async function sairNuvem() {
   if (nuvem.pendente()) await nuvem.enviar().catch(() => {});
   if (nuvem.pendente() && !(await ask('Há alterações que ainda NÃO foram enviadas para a nuvem e serão perdidas. Sair mesmo assim?', 'Sair'))) return;
   await conta.sair().catch(() => {});
-  nuvem.encerrar(); store.clearLocal(); limparEmpresa(); limparFornecedores();
+  nuvem.encerrar(); store.clearLocal(); limparEmpresa(); limparFornecedores(); limparSuprimentos(); limparDiario(); limparMedicoes();
   sessaoAtual = null; authorized = false;
   location.hash = '#/inicio';
   renderGateNuvem('entrar');
@@ -212,7 +218,7 @@ window.addEventListener('geplan:aviso', (e) => toast(e.detail, 7000));
 window.addEventListener('geplan:trocar-empresa', async (e) => {
   await nuvem.enviar().catch(() => {});
   if (nuvem.pendente() && !(await ask('Há alterações não enviadas nesta empresa. Trocar mesmo assim (elas serão perdidas)?', 'Trocar'))) return queueRender();
-  nuvem.encerrar(); store.clearLocal(); limparFornecedores();
+  nuvem.encerrar(); store.clearLocal(); limparFornecedores(); limparSuprimentos(); limparDiario(); limparMedicoes();
   location.hash = '#/inicio';
   await entrarNaEmpresa(e.detail);
 });
@@ -226,6 +232,12 @@ function parseRoute() {
   if (parts[0] === 'fases') return { name: 'fases', id: parts[1] };
   if (parts[0] === 'modulo' && parts[1]) return { name: 'modulo', modulo: parts[1] };
   if (parts[0] === 'fornecedores') return parts[1] ? { name: 'fornecedor', id: parts[1] } : { name: 'fornecedores' };
+  if (parts[0] === 'medicoes') return { name: 'medicoes', secao: parts[1] || 'boletins', id: parts[2] || '' };
+  if (parts[0] === 'diario') return { name: 'diario', obra: parts[1] || '', secao: parts[2] || 'geral', id: parts[3] || '', modo: parts[4] || '' };
+  if (parts[0] === 'suprimentos') {
+    if (parts[1] === 'pedido' && parts[2]) return { name: 'suprimentos', secao: 'pedido', id: parts[2], aba: parts[3] || 'resumo' };
+    return { name: 'suprimentos', secao: parts[1] === 'entregas' ? 'entregas' : 'quadro' };
+  }
   if (['obras', 'composicoes', 'drive', 'importar', 'sinapi', 'pendencias', 'inicio', 'configuracoes'].includes(parts[0])) return { name: parts[0] };
   return { name: 'inicio' };   // página inicial: Visão geral
 }
@@ -241,6 +253,8 @@ function render() {
   }
   if (!authorized) return renderGate();
   document.body.classList.remove('locked');
+  // formulário do RDO com alterações não salvas: a sincronização automática não redesenha por cima
+  if (route.name === 'diario' && route.modo === 'editar' && location.hash === ultimoHash && formRdoSujo()) { renderSync(); return; }
   const ae = document.activeElement;
   const focusKey = ui.pendingFocus || (ae && $view.contains(ae) ? ae.dataset.key : null);
   const sel = ae && ae.dataset?.key === focusKey && 'selectionStart' in ae ? (() => { try { return [ae.selectionStart, ae.selectionEnd]; } catch { return null; } })() : null;
@@ -262,6 +276,9 @@ function render() {
   else if (route.name === 'configuracoes') html = viewConfiguracoes();
   else if (route.name === 'fornecedores') html = viewFornecedores();
   else if (route.name === 'fornecedor') html = viewFornecedor(route);
+  else if (route.name === 'suprimentos') html = viewSuprimentos(route);
+  else if (route.name === 'diario') html = viewDiario(route);
+  else if (route.name === 'medicoes') html = viewMedicoes(route);
   else if (route.name === 'modulo') html = viewModulo(route, resumoDe);
   else if (route.name === 'obra') html = viewObra(route);
   else if (route.name === 'composicoes') html = viewComposicoes();
@@ -288,6 +305,7 @@ function render() {
   if (tw && scrollTree) tw.scrollLeft = scrollTree;
   if (route.name === 'obra') depoisObra(route, scrollGantt);
   if (route.name === 'sinapi') depoisSinapi();
+  if (route.name === 'diario') depoisDiario();
 }
 setRenderer(render);
 
@@ -377,9 +395,9 @@ const mudancasGerais = {
 };
 
 /* ---------- eventos ---------- */
-const acoes = { ...acoesGerais, ...acoesBiblioteca, ...acoesObra, ...acoesFases, ...acoesSinapi, ...acoesGestao, ...acoesEmpresa, ...acoesFornecedores };
-const mudancas = { ...mudancasGerais, ...mudancasBiblioteca, ...mudancasObra, ...mudancasFases, ...mudancasSinapi, ...mudancasGestao, ...mudancasEmpresa, ...mudancasInicio, ...mudancasFornecedores };
-const entradas = { ...entradasBiblioteca, ...entradasObra, ...entradasFases, ...entradasSinapi, ...entradasInicio, ...entradasFornecedores };
+const acoes = { ...acoesGerais, ...acoesBiblioteca, ...acoesObra, ...acoesFases, ...acoesSinapi, ...acoesGestao, ...acoesEmpresa, ...acoesFornecedores, ...acoesSuprimentos, ...acoesDiario, ...acoesMedicoes };
+const mudancas = { ...mudancasGerais, ...mudancasBiblioteca, ...mudancasObra, ...mudancasFases, ...mudancasSinapi, ...mudancasGestao, ...mudancasEmpresa, ...mudancasInicio, ...mudancasFornecedores, ...mudancasSuprimentos, ...mudancasDiario, ...mudancasMedicoes };
+const entradas = { ...entradasBiblioteca, ...entradasObra, ...entradasFases, ...entradasSinapi, ...entradasInicio, ...entradasFornecedores, ...entradasSuprimentos, ...entradasDiario, ...entradasMedicoes };
 
 $view.addEventListener('click', (e) => {
   const el = e.target.closest('[data-act]');

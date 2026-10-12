@@ -37,7 +37,7 @@ export const MODULOS = {
   financeiro: { rotulo: 'Custos previstos e realizados', aba: 'financeiro', texto: 'Orçado, comprometido, incorrido e pago.' },
   diario: { rotulo: 'Diário de obra', aba: 'diario', texto: 'Registro diário: clima, equipe, serviços e ocorrências.' },
   painel: { rotulo: 'Acompanhamento físico', aba: 'painel', texto: 'Painel da obra: físico planejado × realizado, atrasos e prazos.' },
-  compras: { rotulo: 'Pedidos de compra', aba: 'financeiro', secao: 'compras', texto: 'Pedidos de compra e contratos registrados no Financeiro de cada obra.' },
+  compras: { rotulo: 'Compras no Financeiro', aba: 'financeiro', secao: 'compras', texto: 'Pedidos de compra e contratos registrados no Financeiro de cada obra (inclui as compras do quadro).' },
 };
 
 function menu() {
@@ -53,20 +53,22 @@ function menu() {
     { grupo: 'Orçamento e custos', itens: [
       { id: 'mod-orcamento', rotulo: 'Orçamentos', href: '#/modulo/orcamento', ico: 'orcamento' },
       { id: 'composicoes', rotulo: 'Composições de custos', href: '#/composicoes', ico: 'composicoes' },
-      { id: 'mod-medicoes', rotulo: 'Medições', href: '#/modulo/medicoes', ico: 'medicoes' },
+      // modo nuvem: boletins por atividade e profissional; modo local: avanço físico por obra
+      { id: 'mod-medicoes', rotulo: 'Medições', href: nuvem ? '#/medicoes' : '#/modulo/medicoes', ico: 'medicoes' },
       { id: 'mod-financeiro', rotulo: 'Custos previstos e realizados', href: '#/modulo/financeiro', ico: 'custos' },
     ] },
     { grupo: 'Execução e controle', itens: [
-      { id: 'mod-diario', rotulo: 'Diário de obra', href: '#/modulo/diario', ico: 'diario' },
+      { id: 'mod-diario', rotulo: 'Diário de obra', href: '#/diario', ico: 'diario' },
       { id: 'mod-painel', rotulo: 'Acompanhamento físico', href: '#/modulo/painel', ico: 'fisico' },
       { id: 'pendencias', rotulo: 'Tarefas e pendências', href: '#/pendencias', ico: 'tarefas' },
     ] },
     { grupo: 'Suprimentos', itens: [
-      // o que existe hoje: pedidos de compra registrados na aba Financeiro de cada obra
-      { id: 'mod-compras', rotulo: 'Pedidos de compra', href: '#/modulo/compras', ico: 'compras' },
-      { id: 'solicitacoes', rotulo: 'Solicitações', ico: 'tarefas', futuro: 'Em desenvolvimento: solicitação de materiais pela obra, com vários itens.' },
-      { id: 'cotacoes', rotulo: 'Cotações e compras', ico: 'custos', futuro: 'Em desenvolvimento: cotações de vários fornecedores, comparação e aprovação.' },
-      { id: 'entregas', rotulo: 'Entregas e recebimentos', ico: 'entregas', futuro: 'Em desenvolvimento: acompanhamento da entrega e recebimento na obra.' },
+      // quadro de compras e entregas usam o banco da empresa (modo nuvem)
+      ...[['quadro', 'Quadro de compras', 'compras', '#/suprimentos'], ['entregas', 'Entregas e recebimentos', 'entregas', '#/suprimentos/entregas']].map(([id, rotulo, ico, href]) => (nuvem
+        ? { id: `sup-${id}`, rotulo, href, ico }
+        : { id: `sup-${id}`, rotulo, ico, futuro: 'Funciona no modo nuvem (banco de dados da empresa). No modo local, use os pedidos de compra do Financeiro de cada obra.' })),
+      // compromissos de compra registrados na aba Financeiro de cada obra (inclui os gerados pelo quadro)
+      { id: 'mod-compras', rotulo: 'Compras no Financeiro', href: '#/modulo/compras', ico: 'custos' },
       nuvem ? { id: 'fornecedores', rotulo: 'Fornecedores', href: '#/fornecedores', ico: 'fornecedores' }
         : { id: 'fornecedores', rotulo: 'Fornecedores', ico: 'fornecedores', futuro: 'O cadastro de fornecedores funciona no modo nuvem (banco de dados da empresa).' },
     ] },
@@ -95,6 +97,9 @@ export function itemAtivo(route) {
   if (route.name === 'importar') return 'obras';
   if (route.name === 'sinapi') return 'composicoes';
   if (route.name === 'fornecedor') return 'fornecedores';
+  if (route.name === 'suprimentos') return route.secao === 'entregas' ? 'sup-entregas' : 'sup-quadro';
+  if (route.name === 'diario') return 'mod-diario';
+  if (route.name === 'medicoes') return 'mod-medicoes';
   return route.name;
 }
 
@@ -105,7 +110,7 @@ export function renderMenu(route) {
     : `<a href="${it.href}" class="${it.id === ativo ? 'active' : ''}" ${it.id === ativo ? 'aria-current="page"' : ''}>${ICONES[it.ico]}<span>${esc(it.rotulo)}</span></a>`).join('')}</div>`).join('');
   document.getElementById('sidenav').innerHTML = html;
   // menu inferior do celular: atalhos principais + "Menu" (abre o menu completo)
-  const atalhos = [['inicio', 'Início', '#/inicio', 'inicio'], ['obras', 'Obras', '#/obras', 'obras'], ['mod-gantt', 'Cronograma', '#/modulo/gantt', 'gantt'], ['mod-diario', 'Diário', '#/modulo/diario', 'diario']];
+  const atalhos = [['inicio', 'Início', '#/inicio', 'inicio'], ['obras', 'Obras', '#/obras', 'obras'], ['mod-gantt', 'Cronograma', '#/modulo/gantt', 'gantt'], ['mod-diario', 'Diário', '#/diario', 'diario']];
   document.getElementById('bottomnav').innerHTML = atalhos.map(([id, r, h, ic]) => `<a href="${h}" class="${id === ativo ? 'active' : ''}">${ICONES[ic]}${r}</a>`).join('')
     + `<a href="#" data-menu-celular>${ICONES.menu}Menu</a>`;
 }

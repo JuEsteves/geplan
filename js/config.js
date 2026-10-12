@@ -18,5 +18,28 @@ export const ALLOWED_EMAIL_HASHES = [
 //
 // A URL e a chave "anon" (publishable) SÃO PÚBLICAS por natureza: vão para o navegador de qualquer forma.
 // A proteção dos dados vem das políticas RLS do banco. NUNCA coloque aqui a chave "service_role" (secreta).
-export const SUPABASE_URL = 'https://mywimldrzhvwsffwivpw.supabase.co';
-export const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im15d2ltbGRyemh2d3NmZndpdnB3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE3MTE5ODYsImV4cCI6MjEwNzI4Nzk4Nn0.yo08pdfE4lo0Z8frX5Hc8cOY8U3HZAp2Gks8dypekt8';
+//
+// AMBIENTE DE TESTES: o endereço do ramo "teste" na Vercel (geplan-git-teste-….vercel.app) usa o projeto Supabase
+// "GEPLAN-testes", com dados totalmente separados do sistema real, e mostra uma faixa "Ambiente de testes".
+// Por ser outro endereço, a cópia local do navegador também fica separada da do sistema real.
+const BANCOS = {
+  producao: {
+    url: 'https://mywimldrzhvwsffwivpw.supabase.co',
+    anon: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im15d2ltbGRyemh2d3NmZndpdnB3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE3MTE5ODYsImV4cCI6MjEwNzI4Nzk4Nn0.yo08pdfE4lo0Z8frX5Hc8cOY8U3HZAp2Gks8dypekt8',
+  },
+  teste: {   // projeto Supabase "GEPLAN-testes" (mesmas migrações, dados separados)
+    url: 'https://intpnyntneityqpzelxb.supabase.co',
+    anon: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImludHBueW50bmVpdHlxcHplbHhiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE3OTg3NjcsImV4cCI6MjEwNzM3NDc2N30.4EQpJmx9aba4SNIErNIeKh8NtGOc50eI-_taHrUZK2o',
+  },
+};
+export const AMBIENTE = /^geplan-git-teste-/.test(globalThis.location?.hostname || '') ? 'teste' : 'producao';
+export const SUPABASE_URL = BANCOS[AMBIENTE].url;
+export const SUPABASE_ANON_KEY = BANCOS[AMBIENTE].anon;
+
+if (AMBIENTE === 'teste' && globalThis.document) {
+  document.title = `[TESTES] ${document.title}`;
+  const faixa = document.createElement('div');
+  faixa.className = 'faixa-teste';
+  faixa.textContent = 'AMBIENTE DE TESTES — dados separados do sistema real';
+  document.body.prepend(faixa);
+}

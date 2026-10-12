@@ -68,11 +68,20 @@ Orçamento e planejamento: `budget_items`, `budget_versions`, `wbs_nodes`, `acti
 `budget_allocations`, `schedule_baselines`, `schedule_baseline_items`.
 Execução: `activity_measurements`, `daily_reports`, `daily_report_crew`, `daily_report_activities`, `site_occurrences`.
 Financeiro: `contracts`, `contract_amendments`, `expenses`, `payments`.
+Fornecedores (0006): `supplier_categories`, `suppliers`, `supplier_secondary_categories`, `supplier_evaluations`,
+`supplier_documents` + bucket privado `documentos` no Storage.
+Suprimentos (0007): `purchase_orders` (pedido principal, situação calculada), `purchase_groups`, `purchase_items`,
+`purchase_quotes`, `purchase_deliveries`, `purchase_delivery_items`, `purchase_events` (histórico), `purchase_files`;
+liberações por pessoa em `organization_members.permissions` (`tem_liberacao`, `minhas_liberacoes`); a compra de cada
+grupo vira compromisso em `contracts` com `phase_id` (fase da EAP).
+Diário (0008): `daily_reports` passa a ter período, número, situação e aprovação; `rdo_media`, `rdo_comments`,
+`rdo_events`, `rdo_views`; `organizations.logo_path`.
+Medições (0009): `workers`, `worker_agreements`, `measurement_sheets`, `measurement_items`, `measurement_workers`,
+`measurement_pay` (valores, só admin/engenheiro/financeiro), `measurement_events`.
 Views: `v_project_budget`, `v_budget_item_allocation`, `v_contract_totals`, `v_project_costs`, `v_org_usage`.
 
-Ainda **não** criadas (só quando a funcionalidade existir): insumos com preço (`cost_inputs`), fornecedores,
-solicitações/cotações/pedidos detalhados de compra, documentos/anexos (Storage privado), inspeções de qualidade,
-cobranças (`billing_records`, `webhook_events`).
+Ainda **não** criadas (só quando a funcionalidade existir): insumos com preço (`cost_inputs`), documentos/anexos
+das obras, inspeções de qualidade, cobranças (`billing_records`, `webhook_events`).
 
 ## 4. Fórmulas
 
@@ -89,7 +98,7 @@ pesos físicos, Curva S) e `js/cpm.js` (CPM). O banco repete as fórmulas de or�
 | 3 — Obras e orçamento | Telas e cálculos prontos (fases anteriores) e **persistidos no banco** no modo nuvem. Falta: insumos com preço e composições de materiais/equipamentos |
 | 4 — Planejamento | Pronto e persistido (EAP, dependências, CPM, linha de base). Datas do CPM ainda calculadas no aparelho (não gravadas no banco) |
 | 5 — Físico-financeiro | Pronto e persistido (medições, diário, Curva S). Falta: fotos/anexos (Storage privado) e aprovação de medição em duas etapas |
-| 6 — Financeiro e gerencial | Pronto e persistido (contratos, aditivos, despesas, pagamentos, painel). Falta: suprimentos completos (solicitação → cotação → pedido → recebimento), relatórios |
+| 6 — Financeiro e gerencial | Pronto e persistido (contratos, aditivos, despesas, pagamentos, painel). Fornecedores (0006) e Suprimentos (0007: solicitação → cotação → pedido → recebimento, liberações por pessoa). Falta: relatórios |
 | 7 — Preparação comercial | Parcial: planos e limites no banco, área "Plano e uso". Falta: área do assinante completa e painel administrativo |
 | 8 — Pagamentos | Não iniciada (de propósito: só depois de validar multiempresa e segurança com o projeto real) |
 
@@ -97,14 +106,14 @@ pesos físicos, Curva S) e `js/cpm.js` (CPM). O banco repete as fórmulas de or�
 
 | Suíte | O que cobre | Resultado mais recente |
 |---|---|---|
-| `tests/index.html` | cálculo, CPM, curva, medições, BDI, custos, importações | 70/70 |
-| `tests/db.html` | migrações em PostgreSQL real (PGlite), RLS entre empresas e perfis, integridade, limites do plano, auditoria, ida e volta da obra real da planilha pelo motor de sincronização | 62/62 |
-| `tests/nuvem.html` | app real em modo nuvem contra emulador local do Supabase: cadastro, empresa, importar planilha, criar obra, editar orçamento, convite, perfil supervisor, medição, despesa, recarregar sem cópia local, bloqueio de outra empresa | verificado manualmente (roteiro em `supabase/README.md`) |
+| `tests/index.html` | cálculo, CPM, curva, medições, BDI, custos, importações, indicadores, fornecedores, suprimentos, liberações, diário (RDO) e medições por profissional | 95/95 |
+| `tests/db.html` | migrações em PostgreSQL real (PGlite), RLS entre empresas e perfis, integridade, limites do plano, auditoria, fornecedores, suprimentos (pedido com grupos), diário (RDO), medições por profissional e liberações por pessoa, ida e volta da obra real da planilha pelo motor de sincronização | 132/132 |
+| `tests/nuvem.html` | app real em modo nuvem contra emulador local do Supabase: cadastro, empresa, importar planilha, criar obra, editar orçamento, convite, perfil supervisor, medição, despesa, fornecedores, solicitação → cotação → pedido → entregas, liberações, recarregar sem cópia local, bloqueio de outra empresa | verificado pela tela (roteiro em `docs/SUPRIMENTOS.md`) |
 
 ## 7. Limitações conhecidas e riscos
 
-- **O banco real ainda não foi conectado**: falta criar o projeto Supabase e informar URL/chave. Nada no app
-  afirma o contrário; sem configuração ele continua no modo Google Drive.
+- Banco real conectado (projeto Supabase no plano gratuito: pausa por inatividade, sem backup automático). Ainda
+  não há um projeto separado só para testes: as migrações são validadas antes no PGlite e no emulador local.
 - Edição simultânea da mesma linha por duas pessoas: vence a última gravação (por linha, não por obra). Para
   edição colaborativa em tempo real, adicionar *Realtime* do Supabase.
 - O cliente (perfil somente leitura) não vê orçamento/vínculos, então o cronograma dele usa só durações manuais
@@ -118,5 +127,5 @@ pesos físicos, Curva S) e `js/cpm.js` (CPM). O banco repete as fórmulas de or�
    de conferência e migrar as obras do aparelho pela tela **Empresa**.
 2. Anexos privados (fotos do diário e evidências de medição) com Supabase Storage + políticas.
 3. Gravar datas do CPM no banco; relatórios; controles por perfil em todas as telas.
-4. Suprimentos completos; insumos e composições de materiais.
+4. Insumos e composições de materiais (Suprimentos já entregue na Etapa 3).
 5. Área do assinante e painel administrativo; depois pagamentos (Mercado Pago) com webhooks validados no servidor.

@@ -25,9 +25,11 @@ coeficientes de produtividade (h/unid). Fluxo:
 
 O menu lateral é organizado por áreas: **Visão geral** (página inicial), **Planejamento** (Obras, EAP e fases,
 Cronograma, Curva S), **Orçamento e custos** (Orçamentos, Composições, Medições, Custos previstos e realizados),
-**Execução e controle** (Diário de obra, Acompanhamento físico, Tarefas e pendências), **Suprimentos** (Pedidos de
-compra; Solicitações, Cotações, Entregas e Fornecedores aparecem como "em breve"), **Documentos** (Documentos da obra
-"em breve"; Google Drive no modo local) e **Administração** (Empresa/usuários/plano no modo nuvem e Configurações).
+**Execução e controle** (Diário de obra — RDO por período, fotos, aprovação e PDF, ver `docs/DIARIO.md` —,
+Acompanhamento físico, Tarefas e pendências), **Suprimentos** (no modo nuvem:
+Quadro de compras com pedido principal e grupos de materiais, Entregas e recebimentos e Fornecedores — ver
+`docs/SUPRIMENTOS.md`; em todos os modos: Compras no Financeiro), **Documentos** (Documentos da obra "em breve"; Google Drive no modo local) e **Administração**
+(Empresa, usuários, liberações por pessoa e plano no modo nuvem; Configurações).
 Os módulos que existem dentro de cada obra abrem um seletor de obra (ou vão direto, se houver uma só). No celular,
 o rodapé tem Início, Obras, Cronograma, Diário e **Menu** (todas as áreas).
 
@@ -184,6 +186,12 @@ js/inicio.js            Visão geral (página inicial) e Tarefas e pendências
 js/indicadores.js       indicadores por obra e consolidados (critérios de avanço, atraso, custo, pedidos e entregas)
 js/configuracoes.js     Administração › Configurações
 js/fornecedores.js      Fornecedores (modo nuvem): cadastro, busca, ficha, avaliações, documentos, histórico
+js/suprimentos.js       Suprimentos (modo nuvem): quadro de compras, pedido com grupos, cotações, compras, entregas
+js/suprimentosRegras.js critérios de Suprimentos (situação consolidada, pendências, atrasos, filtros, cotações)
+js/liberacoes.js        liberações por pessoa (padrão de cada perfil; o banco confere)
+js/medicoes.js          Medições por atividade e profissional: boletins, profissionais, vínculos, resumos
+js/medicoesRegras.js    critérios das medições (valores, produção × executado, vínculo vigente, pagamento)
+js/diario.js            Diário de obra (RDO): obras em cards, painel da obra, cadastro, visualização, mídias, aprovação, PDF
 js/validacao.js         CPF/CNPJ, e-mail, UF e busca sem acento
 js/nuvem/arquivos.js    envio e links temporários de arquivos (Supabase Storage privado)
 docs/*.md               documentação por módulo e histórico de versões (as planilhas de docs/ não vão para o GitHub)

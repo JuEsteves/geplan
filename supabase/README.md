@@ -16,6 +16,9 @@ antigo (dados no aparelho + Google Drive). Preenchidos, passa a usar o banco.
 | `…0004_execucao_financeiro.sql` | medições (uma por atividade/data, ≤ 100%, % da atividade recalculado no servidor), diário (equipe, serviços, ocorrências), contratos/pedidos, aditivos, despesas, pagamentos (≤ valor da despesa) |
 | `…0005_indicadores.sql` | `bdi_tcu()`, views de orçamento, vínculos, contratos, custos (comprometido/incorrido/pago/a incorrer) e uso do plano |
 | `…0006_fornecedores.sql` | fornecedores, categorias configuráveis (14 padrão por empresa), categorias secundárias, avaliações manuais, documentos; `supplier_id` em contratos e despesas; validação de CPF/CNPJ; **bucket privado `documentos` no Storage** e suas políticas (detalhes em `docs/FORNECEDORES.md`) |
+| `…0007_suprimentos.sql` | **liberações por pessoa** (`organization_members.permissions`, `tem_liberacao`, `minhas_liberacoes`); **pedido principal com grupos de materiais** (itens, cotações, compra por grupo → compromisso no Financeiro com a fase, entregas por item, histórico, anexos); situação do pedido calculada pelo banco; `contracts.phase_id` (detalhes em `docs/SUPRIMENTOS.md`) |
+| `…0008_diario.sql` | **Diário de obra (RDO)**: período, número, situação, revisão/aprovação com assinaturas (`rdo_acao`), campos estruturados, mídias (`rdo_media`), comentários, histórico (`rdo_events`), visualizações, liberação `aprovar_rdo`, logo da empresa, áreas `obras`/`empresa` e vídeos no Storage (detalhes em `docs/DIARIO.md`) |
+| `…0009_medicoes.sql` | **Medições por profissional**: profissionais (sem dados bancários), vínculos de remuneração com vigência, boletins com itens e produção, `medicao_acao` (enviar/devolver/aprovar, grava avanço físico e valores congelados), `medicao_lancar_despesas`, liberação `aprovar_medicao`; valores só para admin/engenheiro/financeiro (detalhes em `docs/MEDICOES.md`) |
 
 Todas as tabelas têm **RLS ligado**. Valores em dinheiro e quantidades usam `NUMERIC` (sem erro de ponto flutuante).
 Registros financeiros e históricos não são apagados pelo app: exclusão **lógica** (`deleted_at`) e trilha em `audit_log`.
@@ -66,6 +69,12 @@ where table_schema = 'public' and data_type in ('real', 'double precision');
 | Financeiro | obras em que foi incluído | despesas, pagamentos, contratos/pedidos |
 | Compras | obras em que foi incluído | contratos/pedidos |
 | Cliente | obras em que foi incluído, sem custos internos | nada (somente leitura) |
+
+**Liberações por pessoa** (migração 0007), marcadas pelo administrador na tela Empresa: *solicitar materiais*,
+*cotar e emitir pedidos* (vale também para contratos/pedidos no Financeiro), *registrar entregas* e *gerenciar
+fornecedores*. Sem marcação, vale o padrão do perfil — que reproduz as regras acima (supervisor: solicitar e receber;
+financeiro: solicitar, comprar e fornecedores; compras e engenheiro: todas). Administrador sempre tem todas; cliente,
+nenhuma.
 
 Além do perfil, gravações exigem assinatura **ativa ou em avaliação**; o banco aplica os limites de obras e
 usuários do plano (`plans`). Nenhuma empresa enxerga dados de outra.

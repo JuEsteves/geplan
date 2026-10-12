@@ -78,7 +78,8 @@ Diário (0008): `daily_reports` passa a ter período, número, situação e apro
 `rdo_events`, `rdo_views`; `organizations.logo_path`.
 Medições (0009): `workers`, `worker_agreements`, `measurement_sheets`, `measurement_items`, `measurement_workers`,
 `measurement_pay` (valores, só admin/engenheiro/financeiro), `measurement_events`.
-Views: `v_project_budget`, `v_budget_item_allocation`, `v_contract_totals`, `v_project_costs`, `v_org_usage`.
+Integração (0010): `expenses.phase_id`; `v_medicao_a_lancar`; funções `fase_raiz`, `custos_por_fase`.
+Views: `v_project_budget`, `v_budget_item_allocation`, `v_contract_totals`, `v_project_costs`, `v_medicao_a_lancar`, `v_org_usage`.
 
 Ainda **não** criadas (só quando a funcionalidade existir): insumos com preço (`cost_inputs`), documentos/anexos
 das obras, inspeções de qualidade, cobranças (`billing_records`, `webhook_events`).
@@ -98,7 +99,7 @@ pesos físicos, Curva S) e `js/cpm.js` (CPM). O banco repete as fórmulas de or�
 | 3 — Obras e orçamento | Telas e cálculos prontos (fases anteriores) e **persistidos no banco** no modo nuvem. Falta: insumos com preço e composições de materiais/equipamentos |
 | 4 — Planejamento | Pronto e persistido (EAP, dependências, CPM, linha de base). Datas do CPM ainda calculadas no aparelho (não gravadas no banco) |
 | 5 — Físico-financeiro | Pronto e persistido (medições, diário, Curva S). Falta: fotos/anexos (Storage privado) e aprovação de medição em duas etapas |
-| 6 — Financeiro e gerencial | Pronto e persistido (contratos, aditivos, despesas, pagamentos, painel). Fornecedores (0006) e Suprimentos (0007: solicitação → cotação → pedido → recebimento, liberações por pessoa). Falta: relatórios |
+| 6 — Financeiro e gerencial | Pronto e persistido (contratos, aditivos, despesas, pagamentos, painel). Fornecedores (0006) e Suprimentos (0007: solicitação → cotação → pedido → recebimento, liberações por pessoa). Custos por fase sem duplicidade (0010). Falta: relatórios |
 | 7 — Preparação comercial | Parcial: planos e limites no banco, área "Plano e uso". Falta: área do assinante completa e painel administrativo |
 | 8 — Pagamentos | Não iniciada (de propósito: só depois de validar multiempresa e segurança com o projeto real) |
 
@@ -106,8 +107,8 @@ pesos físicos, Curva S) e `js/cpm.js` (CPM). O banco repete as fórmulas de or�
 
 | Suíte | O que cobre | Resultado mais recente |
 |---|---|---|
-| `tests/index.html` | cálculo, CPM, curva, medições, BDI, custos, importações, indicadores, fornecedores, suprimentos, liberações, diário (RDO) e medições por profissional | 95/95 |
-| `tests/db.html` | migrações em PostgreSQL real (PGlite), RLS entre empresas e perfis, integridade, limites do plano, auditoria, fornecedores, suprimentos (pedido com grupos), diário (RDO), medições por profissional e liberações por pessoa, ida e volta da obra real da planilha pelo motor de sincronização | 132/132 |
+| `tests/index.html` | cálculo, CPM, curva, medições, BDI, custos, importações, indicadores, fornecedores, suprimentos, liberações, diário (RDO), medições por profissional e custos por fase | 98/98 |
+| `tests/db.html` | migrações em PostgreSQL real (PGlite), RLS entre empresas e perfis, integridade, limites do plano, auditoria, fornecedores, suprimentos (pedido com grupos), diário (RDO), medições por profissional, liberações por pessoa, custos por fase (banco = app), ida e volta da obra real da planilha pelo motor de sincronização | 141/141 |
 | `tests/nuvem.html` | app real em modo nuvem contra emulador local do Supabase: cadastro, empresa, importar planilha, criar obra, editar orçamento, convite, perfil supervisor, medição, despesa, fornecedores, solicitação → cotação → pedido → entregas, liberações, recarregar sem cópia local, bloqueio de outra empresa | verificado pela tela (roteiro em `docs/SUPRIMENTOS.md`) |
 
 ## 7. Limitações conhecidas e riscos

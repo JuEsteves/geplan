@@ -9,6 +9,8 @@ import { configurado as nuvemConfigurada, sb, erroBanco } from './nuvem/supabase
 import * as nuvem from './nuvem/nuvem.js';
 import { enviarArquivo, urlTemporaria, ACCEPT, tamanhoLegivel, validarArquivo } from './nuvem/arquivos.js';
 import { docValido, formatarDoc, tipoDoc, soDigitos, emailValido, UFS, normalizar } from './validacao.js';
+import { liberado } from './permissoes.js';
+import { indicadoresEntrega, OCORRENCIAS } from './suprimentosRegras.js';
 
 const CRITERIOS = [['punctuality', 'Pontualidade'], ['quantity_ok', 'Conformidade da quantidade'], ['quality', 'Qualidade do material'],
   ['service', 'Atendimento'], ['issue_resolution', 'Resolução de ocorrências']];
@@ -17,15 +19,24 @@ const TIPOS_DOC = ['Proposta', 'Catálogo', 'Documento cadastral', 'Outro'];
 const F = { carregado: false, carregando: false, erro: '', lista: [], categorias: [], secundarias: new Map(), fichas: new Map() };
 
 const papel = () => nuvem.contexto()?.papel;
-export const podeEditarFornecedor = () => ['admin', 'engenheiro', 'compras', 'financeiro'].includes(papel());
+// gravação segue a liberação "fornecedores" (padrão: admin, engenheiro, compras, financeiro — migração 0007)
+export const podeEditarFornecedor = () => !!papel() && papel() !== 'cliente' && liberado('fornecedores');
 const podeAvaliar = () => ['admin', 'engenheiro', 'compras', 'financeiro', 'supervisor'].includes(papel());
 export const podeCategorias = () => ['admin', 'engenheiro', 'compras'].includes(papel());
 const disponivel = () => nuvemConfigurada() && nuvem.ativo() && papel() && papel() !== 'cliente';
 const ok = ({ data, error }, onde) => { if (error) throw erroBanco(error, onde); return data; };
 
 /* ---------- dados ---------- */
-export async function carregarFornecedores(forcar = false) {
-  if (!disponivel() || F.carregando || (F.carregado && !forcar)) return;
+let carregandoP = null;
+/** Carrega a lista (uma vez). Quem chama durante um carregamento recebe a mesma promessa e pode aguardar. */
+export function carregarFornecedores(forcar = false) {
+  if (!disponivel()) return Promise.resolve();
+  if (F.carregando) return carregandoP;
+  if (F.carregado && !forcar) return Promise.resolve();
+  carregandoP = carregarAgora();
+  return carregandoP;
+}
+async function carregarAgora() {
   F.carregando = true; F.erro = '';
   try {
     const c = await sb(); const org = nuvem.contexto().orgId;
@@ -45,18 +56,49 @@ export async function carregarFornecedores(forcar = false) {
 }
 async function carregarFicha(id, forcar = false) {
   if (F.fichas.has(id) && !forcar) return;
-  F.fichas.set(id, { carregando: true, avaliacoes: [], documentos: [] });
+  F.fichas.set(id, { carregando: true, avaliacoes: [], documentos: [], cotacoes: [], entregas: [], limites: new Map() });
   try {
     const c = await sb();
-    const [av, docs] = await Promise.all([
+    const s = fornecedorPorId(id);
+    const ids = store.obras().map((o) => o.id);
+    const nada = { data: [] };
+    const colsCot = 'id, status, project_id, supplier_id, supplier_name, total_amount, freight_amount, lead_days, created_at';
+    const colsGr = 'id, order_id, supplier_id, supplier_name, expected_date';
+    const [av, docs, cots, cotsSemVinculo, grs, grsSemVinculo] = await Promise.all([
       c.from('supplier_evaluations').select('*').eq('supplier_id', id).order('created_at', { ascending: false }),
       c.from('supplier_documents').select('*').eq('supplier_id', id).is('deleted_at', null).order('created_at', { ascending: false }),
+      c.from('purchase_quotes').select(colsCot).eq('supplier_id', id).is('deleted_at', null),
+      ids.length ? c.from('purchase_quotes').select(colsCot).in('project_id', ids).is('supplier_id', null).is('deleted_at', null) : nada,
+      c.from('purchase_groups').select(colsGr).eq('supplier_id', id).is('deleted_at', null),
+      ids.length ? c.from('purchase_groups').select(colsGr).in('project_id', ids).is('supplier_id', null).neq('supplier_name', '').is('deleted_at', null) : nada,
     ]);
-    F.fichas.set(id, { carregando: false, avaliacoes: ok(av, 'avaliações') || [], documentos: ok(docs, 'documentos') || [] });
-  } catch (e) { F.fichas.set(id, { carregando: false, erro: e.message, avaliacoes: [], documentos: [] }); }
+    const daqui = (l) => (l || []).filter((x) => s && casaFornecedor(s, null, x.supplier_name));
+    const cotacoes = [...(ok(cots, 'cotações') || []), ...daqui(ok(cotsSemVinculo, 'cotações'))];
+    // entregas dos grupos comprados deste fornecedor; limite do prazo = data necessária do pedido (ou a previsão do grupo)
+    const grupos = [...(ok(grs, 'grupos') || []), ...daqui(ok(grsSemVinculo, 'grupos'))];
+    let entregas = [], limites = new Map();
+    if (grupos.length) {
+      const [ents, peds] = await Promise.all([
+        c.from('purchase_deliveries').select('*').in('group_id', grupos.map((g) => g.id)).is('deleted_at', null),
+        c.from('purchase_orders').select('id, needed_date').in('id', [...new Set(grupos.map((g) => g.order_id))]),
+      ]);
+      entregas = ok(ents, 'entregas') || [];
+      const nec = new Map((ok(peds, 'pedidos') || []).map((p) => [p.id, p.needed_date]));
+      limites = new Map(grupos.map((g) => [g.id, nec.get(g.order_id) || g.expected_date || '']));
+    }
+    F.fichas.set(id, { carregando: false, avaliacoes: ok(av, 'avaliações') || [], documentos: ok(docs, 'documentos') || [], cotacoes, entregas, limites });
+  } catch (e) { F.fichas.set(id, { carregando: false, erro: e.message, avaliacoes: [], documentos: [], cotacoes: [], entregas: [], limites: new Map() }); }
   queueRender();
 }
+/** Mesmo critério do histórico comercial: ligado pelo cadastro ou, sem vínculo, pelo nome comercial/razão social. */
+function casaFornecedor(s, id, nome) {
+  if (id) return id === s.id;
+  const n = normalizar(nome || '').trim();
+  return !!n && [s.trade_name, s.legal_name].some((x) => x && normalizar(x).trim() === n);
+}
 export const fornecedoresAtivos = () => F.lista.filter((s) => s.status === 'ativo');
+/** Categorias de fornecedor da empresa (também usadas nos grupos de materiais dos pedidos). */
+export const categoriasFornecedor = () => F.categorias;
 export const fornecedorPorId = (id) => F.lista.find((s) => s.id === id);
 const nomeCategoria = (id) => F.categorias.find((c) => c.id === id)?.name || '';
 
@@ -99,7 +141,7 @@ export function historicoFornecedor(s, obras) {
 /* ---------- telas ---------- */
 const indisponivel = () => `<div class="page-head"><div><h1>Fornecedores</h1></div></div>
   <div class="card empty"><p>${!nuvemConfigurada() ? 'O cadastro de fornecedores funciona no modo nuvem (banco de dados da empresa). Este aparelho está no modo local (Google Drive).'
-    : papel() === 'cliente' ? 'Seu perfil não tem acesso ao cadastro de fornecedores.' : 'Entre na sua empresa para ver os fornecedores.'}</p></div>`;
+    : papel() === 'cliente' ? 'Seu perfil não tem acesso ao cadastro de fornecedores.' : 'Carregando os dados da empresa…'}</p></div>`;
 
 export function viewFornecedores() {
   if (!disponivel()) return indisponivel();
@@ -194,7 +236,24 @@ export function viewFornecedor(route) {
         ${h.linhas.map((l) => `<tr><td class="nowrap small">${l.data ? isoBR(l.data) : '—'}</td><td><a href="#/obra/${l.o.id}/financeiro">${esc(l.o.nome)}</a></td><td class="small">${esc(l.tipo)}${l.porNome ? ' <span class="badge" title="Registro antigo ligado pelo nome do fornecedor">pelo nome</span>' : ''}</td><td class="small">${esc(l.desc)}</td><td class="num nowrap">${fmtBRL(l.valor)}</td><td class="small">${esc(l.status || '')}</td></tr>`).join('')}
         </tbody></table></div>`
         : '<div class="muted small">Nenhum contrato, pedido ou despesa com este fornecedor nas obras que você pode ver.</div>'}
-      <div class="muted small">Cotações, prazos de entrega e ocorrências de entrega entram aqui com o módulo de Suprimentos (em desenvolvimento).</div>
+    </div>
+
+    <div class="card card-pad stack"><h2>Cotações e entregas</h2>
+      ${(() => {
+        const ind = indicadoresEntrega(ficha.entregas || [], ficha.limites || new Map());
+        const cots = ficha.cotacoes || [];
+        const escolhidas = cots.filter((c) => c.status === 'escolhida').length;
+        if (ficha.carregando) return '<div class="muted small">Carregando…</div>';
+        if (!cots.length && !ind.entregas) return '<div class="muted small">Nenhuma cotação nem entrega registrada para este fornecedor em Suprimentos.</div>';
+        return `<div class="kpis">
+          <div class="card kpi"><div class="k-label">Cotações</div><div class="k-value">${cots.length}</div><div class="k-sub">${escolhidas} escolhida(s) para pedido</div></div>
+          <div class="card kpi"><div class="k-label">Entregas registradas</div><div class="k-value">${ind.entregas}</div></div>
+          <div class="card kpi"><div class="k-label">Entregas no prazo</div><div class="k-value">${ind.pctNoPrazo == null ? '—' : `${fmtNum(ind.pctNoPrazo, 1)}%`}</div><div class="k-sub">${ind.comDataNecessaria ? `${ind.noPrazo} de ${ind.comDataNecessaria} com data necessária` : 'nenhum pedido com data necessária'}</div></div>
+          <div class="card kpi"><div class="k-label">Quantidade conforme</div><div class="k-value">${ind.pctConformes == null ? '—' : `${fmtNum(ind.pctConformes, 1)}%`}</div><div class="k-sub">${ind.conformes} de ${ind.entregas} entrega(s)</div></div>
+        </div>
+        ${ind.totalOcorrencias ? `<div class="small"><span class="muted">Ocorrências:</span> ${Object.entries(ind.ocorrencias).map(([k, n]) => `${esc(OCORRENCIAS[k] || k)} (${n})`).join(', ')}</div>` : ''}
+        <div class="muted small">Calculado das entregas registradas em Suprimentos nos grupos comprados deste fornecedor (ligados ao cadastro ou, sem vínculo, pelo nome): "no prazo" = recebida até a data necessária do pedido (ou, sem ela, até a previsão do grupo); "conforme" = sem divergência nem ocorrência. São números do histórico, não uma nota do fornecedor.</div>`;
+      })()}
     </div>
 
     <div class="grid-2">
@@ -204,7 +263,7 @@ export function viewFornecedor(route) {
         ${ficha.avaliacoes.length ? `<table class="data"><tbody>${medias.map((m) => `<tr><td>${m.rot}</td><td class="num">${m.media == null ? '—' : `${fmtNum(m.media, 1)} <span class="muted small">(${m.n})</span>`}</td></tr>`).join('')}</tbody></table>
           <ul class="lista">${ficha.avaliacoes.slice(0, 6).map((a) => `<li class="small"><b>${new Date(a.created_at).toLocaleDateString('pt-BR')}</b> ${esc(a.evaluator_label || '')}${a.project_id ? ` · ${esc(store.obra(a.project_id)?.nome || 'obra')}` : ''}${a.comment ? `<div class="muted">${esc(a.comment)}</div>` : ''}</li>`).join('')}</ul>`
           : `<div class="muted small">${ficha.carregando ? 'Carregando…' : 'Nenhuma avaliação registrada.'}</div>`}
-        <div class="muted small">Indicadores calculados automaticamente (pontualidade e quantidade por entrega registrada) virão do módulo de Entregas.</div>
+        <div class="muted small">Indicadores calculados das entregas estão no quadro "Cotações e entregas".</div>
       </div>
       <div class="card card-pad stack">
         <div class="row between"><h2>Documentos</h2>${editar ? `<button class="btn sm" data-act="fornDocumento" data-id="${s.id}">${I.upload} Anexar</button>` : ''}</div>

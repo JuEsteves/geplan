@@ -5,7 +5,7 @@ import { savedUser } from './drive.js';
 import { uid, registrar, CATEGORIAS_CUSTO, TIPOS_OCORRENCIA } from './model.js';
 import { avanco, fracPlanejada, pctRealAte, incorridoAte } from './curvaS.js';
 import { resumoOrcamento, resumoCustos, totalCompromisso, pagoDespesa, despesaDuplicada, valorAgregado } from './financeiro.js';
-import { quantidadePlanejada, metodoMedicao, medicoesDe, registrarMedicao, removerMedicao, novoDiario, salvarDiario, filtrarDiario, pendenciasAbertas } from './execucao.js';
+import { quantidadePlanejada, metodoMedicao, medicoesDe, registrarMedicao, removerMedicao, pendenciasAbertas, periodoRdo, badgeRdo } from './execucao.js';
 import { toDay, toISO, fmtBR, isoBR, todayDay, todayISO, fmtNum, fmtBRL } from './schedule.js';
 import { esc, I, ui, toast, ask, info, formDialog, commit, queueRender, parseNum, fmtIn } from './ui.js';
 import { contexto } from './obra.js';
@@ -182,109 +182,20 @@ async function dialogoMedir(o, c, a) {
 }
 
 /* =====================================================================
-   DIÁRIO DE OBRA
+   DIÁRIO DE OBRA — tem página própria (js/diario.js); aqui só o resumo e os atalhos
    ===================================================================== */
-const CLIMAS = ['Bom', 'Nublado', 'Chuva fraca', 'Chuva forte', 'Impraticável'];
 export function tabDiario(c) {
   const { o } = c;
-  const f = ui.diarioFiltro || {};
-  const lista = filtrarDiario(o, f);
-  const respons = [...new Set((o.diario || []).map((d) => d.responsavel).filter(Boolean))];
-  const folhasOpt = c.o.eap.filter((a) => !(c.filhos.get(a.id) || []).length);
-  const cards = lista.map((d) => `<div class="card diario-item">
-    <div class="row between"><div><b>${isoBR(d.data)}</b> <span class="muted small">${['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'][new Date(d.data + 'T12:00').getDay()]}</span>
-      <span class="badge">${esc(d.clima?.manha)} / ${esc(d.clima?.tarde)}</span>${d.praticavel === false ? '<span class="badge crit">impraticável</span>' : ''}
-      ${d.ocorrencias.length ? d.ocorrencias.map((x) => `<span class="badge ${x.tipo === 'Impedimento' ? 'crit' : 'warn'}">${esc(x.tipo)}${x.resolvida ? ' ✓' : ''}</span>`).join('') : ''}</div>
-      <div class="row"><span class="muted small">${esc(d.responsavel || '')}</span><button class="btn sm" data-act="diarioEditar" data-id="${d.id}">Abrir</button></div></div>
-    <div class="small" style="margin-top:6px">${d.equipe.length ? `<b>Equipe:</b> ${d.equipe.map((e) => `${esc(e.qtd)} ${esc(e.funcao)}`).join(', ')} · ` : ''}${d.servicos.length ? `<b>Serviços:</b> ${d.servicos.map((s) => esc(s.atividadeId ? (c.porId.get(s.atividadeId)?.codigo + ' ' + (s.descricao || c.porId.get(s.atividadeId)?.descricao || '')) : s.descricao)).join('; ')}` : '<span class="muted">sem serviços registrados</span>'}</div>
-    ${d.observacoes ? `<div class="small muted" style="margin-top:4px">${esc(d.observacoes)}</div>` : ''}
-  </div>`).join('');
+  const lista = [...(o.diario || [])].sort((a, b) => b.data.localeCompare(a.data)).slice(0, 6);
   return `<div class="stack">
-    <div class="card card-pad row">
-      <label class="field" style="max-width:160px">De<input type="date" data-chg="diarioF" data-f="de" value="${f.de || ''}"></label>
-      <label class="field" style="max-width:160px">Até<input type="date" data-chg="diarioF" data-f="ate" value="${f.ate || ''}"></label>
-      <label class="field" style="max-width:200px">Ocorrência<select data-chg="diarioF" data-f="tipo"><option value="">Todas</option>${TIPOS_OCORRENCIA.map((t) => `<option ${t === f.tipo ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
-      <label class="field" style="max-width:220px">Responsável<select data-chg="diarioF" data-f="responsavel"><option value="">Todos</option>${respons.map((r) => `<option ${r === f.responsavel ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select></label>
-      <label class="field" style="flex:1;min-width:200px">Atividade<select data-chg="diarioF" data-f="atividadeId"><option value="">Todas</option>${folhasOpt.map((a) => `<option value="${a.id}" ${a.id === f.atividadeId ? 'selected' : ''}>${esc(a.codigo)} ${esc(a.descricao)}</option>`).join('')}</select></label>
-    </div>
-    <div class="row"><button class="btn primary" data-act="diarioNovo">${I.plus} Registro de hoje</button><button class="btn" data-act="diarioNovoData">${I.plus} Outra data</button>
-      <span style="flex:1"></span><button class="btn sm" data-act="diarioPdf">Exportar PDF</button><button class="btn sm" data-act="diarioXlsx">Exportar Excel</button></div>
-    ${cards || vazioCard((o.diario || []).length ? 'Nenhum registro com esse filtro.' : 'Nenhum registro no diário ainda.')}
-    <div class="muted small">O diário registra o dia a dia da obra. O avanço físico é lançado nas <a href="#/obra/${o.id}/medicoes">Medições</a> (registros relacionados, mas com finalidades distintas). Fotos e anexos: em breve.</div>
+    <div class="card card-pad row between" style="flex-wrap:wrap;gap:10px"><div><h2 style="margin:0">Diário de obra (RDO)</h2>
+      <div class="muted small">Relatórios por período, fotos e vídeos, aprovação com assinatura e PDF ficam no painel do diário da obra.</div></div>
+      <div class="row"><a class="btn primary" href="#/diario/${o.id}/rdo/novo/editar">${I.plus} Novo relatório</a><a class="btn" href="#/diario/${o.id}">Abrir o diário da obra</a></div></div>
+    ${lista.length ? `<div class="card table-wrap"><table class="data tabela-clicavel"><thead><tr><th>Período</th><th>Nº</th><th>Situação</th><th>Responsável</th></tr></thead><tbody>
+      ${lista.map((d) => `<tr data-act="diarioAbrir" data-obra="${o.id}" data-id="${d.id}" tabindex="0"><td class="nowrap">${periodoRdo(d)}</td><td>${d.numero || '—'}</td><td>${badgeRdo(d.status)}</td><td class="small">${esc(d.responsavel || '')}</td></tr>`).join('')}
+    </tbody></table></div>` : vazioCard('Nenhum relatório no diário ainda.')}
+    <div class="muted small">O diário registra o dia a dia da obra. O avanço físico é lançado nas <a href="#/obra/${o.id}/medicoes">Medições</a> (registros relacionados, mas com finalidades distintas).</div>
   </div>`;
-}
-
-async function dialogoDiario(o, c, d) {
-  const folhasOpt = o.eap.filter((a) => !(c.filhos.get(a.id) || []).length);
-  const optAtiv = (sel) => `<option value="">— texto livre —</option>${folhasOpt.map((a) => `<option value="${a.id}" ${a.id === sel ? 'selected' : ''}>${esc(a.codigo)} ${esc(a.descricao)}</option>`).join('')}`;
-  const linhaEquipe = (e = {}) => `<div class="row lin"><input name="eqFuncao" placeholder="Função (ex.: Pedreiro)" value="${esc(e.funcao || '')}" style="flex:2;min-width:140px"><input name="eqQtd" inputmode="numeric" placeholder="Qtd" value="${esc(e.qtd || '')}" style="width:80px"><button type="button" class="icon-btn danger rm">${I.trash}</button></div>`;
-  const linhaServ = (s = {}) => `<div class="row lin"><select name="svAtiv" style="flex:2;min-width:180px">${optAtiv(s.atividadeId)}</select><input name="svDesc" placeholder="Descrição / local" value="${esc(s.descricao || '')}" style="flex:2;min-width:140px"><button type="button" class="icon-btn danger rm">${I.trash}</button></div>`;
-  const linhaOc = (x = {}) => `<div class="row lin"><select name="ocTipo" style="width:170px">${TIPOS_OCORRENCIA.map((t) => `<option ${t === x.tipo ? 'selected' : ''}>${t}</option>`).join('')}</select><input name="ocDesc" placeholder="Descrição" value="${esc(x.descricao || '')}" style="flex:1;min-width:160px"><label class="check small"><input type="checkbox" name="ocRes" ${x.resolvida ? 'checked' : ''}> resolvida</label><button type="button" class="icon-btn danger rm">${I.trash}</button></div>`;
-  const form = await dialogo(`Diário de obra — ${isoBR(d.data)}`, `
-    <div class="grid-form">
-      <label class="field">Data<input type="date" name="data" required value="${d.data}"></label>
-      <label class="field">Clima — manhã<select name="climaM">${CLIMAS.map((x) => `<option ${x === d.clima?.manha ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
-      <label class="field">Clima — tarde<select name="climaT">${CLIMAS.map((x) => `<option ${x === d.clima?.tarde ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
-      <label class="check" style="align-self:end"><input type="checkbox" name="praticavel" ${d.praticavel !== false ? 'checked' : ''}> Dia praticável</label>
-    </div>
-    <fieldset><legend>Equipe e profissionais presentes</legend><div data-lista="eq">${(d.equipe.length ? d.equipe : [{}]).map(linhaEquipe).join('')}</div><button type="button" class="btn sm" data-add="eq">${I.plus} Função</button></fieldset>
-    <fieldset><legend>Serviços realizados</legend><div data-lista="sv">${(d.servicos.length ? d.servicos : [{}]).map(linhaServ).join('')}</div><button type="button" class="btn sm" data-add="sv">${I.plus} Serviço</button></fieldset>
-    <div class="grid-form">
-      <label class="field">Materiais recebidos<textarea name="materiais" rows="2">${esc(d.materiais)}</textarea></label>
-      <label class="field">Equipamentos<textarea name="equipamentos" rows="2">${esc(d.equipamentos)}</textarea></label>
-      <label class="field">Visitas<textarea name="visitas" rows="2">${esc(d.visitas)}</textarea></label>
-      <label class="field">Reuniões<textarea name="reunioes" rows="2">${esc(d.reunioes)}</textarea></label>
-    </div>
-    <fieldset><legend>Ocorrências, interferências e impedimentos</legend><div data-lista="oc">${d.ocorrencias.map(linhaOc).join('')}</div><button type="button" class="btn sm" data-add="oc">${I.plus} Ocorrência</button></fieldset>
-    <label class="field">Observações técnicas<textarea name="observacoes" rows="3">${esc(d.observacoes)}</textarea></label>
-    <div class="muted small">Responsável: ${esc(d.responsavel || usuario() || '—')}</div>`, {
-    largo: true,
-    montar: (form) => {
-      const novos = { eq: linhaEquipe, sv: linhaServ, oc: linhaOc };
-      form.addEventListener('click', (e) => {
-        const add = e.target.closest('[data-add]');
-        if (add) { form.querySelector(`[data-lista="${add.dataset.add}"]`).insertAdjacentHTML('beforeend', novos[add.dataset.add]()); return; }
-        const rm = e.target.closest('.rm'); if (rm) rm.closest('.lin').remove();
-      });
-    },
-  });
-  if (!form) return;
-  const fd = new FormData(form);
-  const linhas = (sel) => [...form.querySelectorAll(`[data-lista="${sel}"] .lin`)];
-  const novo = {
-    ...d, data: fd.get('data'), clima: { manha: fd.get('climaM'), tarde: fd.get('climaT') }, praticavel: fd.has('praticavel'),
-    equipe: linhas('eq').map((l) => ({ funcao: l.querySelector('[name=eqFuncao]').value.trim(), qtd: parseNum(l.querySelector('[name=eqQtd]').value) || 0 })).filter((e) => e.funcao),
-    servicos: linhas('sv').map((l) => ({ atividadeId: l.querySelector('[name=svAtiv]').value || null, descricao: l.querySelector('[name=svDesc]').value.trim() })).filter((s) => s.atividadeId || s.descricao),
-    ocorrencias: linhas('oc').map((l) => ({ id: uid(), tipo: l.querySelector('[name=ocTipo]').value, descricao: l.querySelector('[name=ocDesc]').value.trim(), resolvida: l.querySelector('[name=ocRes]').checked })).filter((x) => x.descricao),
-    materiais: fd.get('materiais'), equipamentos: fd.get('equipamentos'), visitas: fd.get('visitas'), reunioes: fd.get('reunioes'), observacoes: fd.get('observacoes'),
-    responsavel: d.responsavel || usuario(),
-  };
-  try { salvarDiario(o, novo, usuario()); commit(o); toast('Diário salvo.'); } catch (e) { toast(e.message, 5000); }
-}
-
-async function exportarDiario(o, c, formato) {
-  const lista = filtrarDiario(o, ui.diarioFiltro || {}).slice().sort((a, b) => a.data.localeCompare(b.data));
-  if (!lista.length) return toast('Nenhum registro para exportar.');
-  const nomeAtiv = (s) => (s.atividadeId ? `${c.porId.get(s.atividadeId)?.codigo || ''} ${s.descricao || c.porId.get(s.atividadeId)?.descricao || ''}` : s.descricao);
-  const linhas = lista.map((d) => [isoBR(d.data), `${d.clima?.manha}/${d.clima?.tarde}${d.praticavel === false ? ' (impraticável)' : ''}`,
-    d.equipe.map((e) => `${e.qtd} ${e.funcao}`).join(', '), d.servicos.map(nomeAtiv).join('; '),
-    [d.materiais && `Materiais: ${d.materiais}`, d.equipamentos && `Equipamentos: ${d.equipamentos}`, d.visitas && `Visitas: ${d.visitas}`, d.reunioes && `Reuniões: ${d.reunioes}`].filter(Boolean).join(' | '),
-    d.ocorrencias.map((x) => `${x.tipo}: ${x.descricao}${x.resolvida ? ' (resolvida)' : ''}`).join('; '), d.observacoes || '', d.responsavel || '']);
-  const cab = ['Data', 'Clima', 'Equipe', 'Serviços', 'Materiais/equipamentos/visitas', 'Ocorrências', 'Observações', 'Responsável'];
-  if (formato === 'xlsx') {
-    await loadScript(LIBS.xlsx);
-    const X = window.XLSX; const wb = X.utils.book_new();
-    X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet([[`Diário de obra — ${o.nome}`], [], cab, ...linhas]), 'Diário');
-    X.writeFile(wb, `Diario de obra - ${o.nome.replace(/[\\/:*?"<>|]/g, '-')}.xlsx`);
-    return;
-  }
-  await loadScript(LIBS.jspdf); await loadScript(LIBS.autotable);
-  const doc = new window.jspdf.jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.setTextColor(20, 48, 90); doc.text(`Diário de obra — ${o.nome}`, 10, 14);
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(90);
-  doc.text(`${o.endereco || ''} ${o.cidade || ''} · Responsável técnico: ${o.engenheiro || '—'} ${o.crea ? `(CREA ${o.crea})` : ''} · ${lista.length} registro(s)`, 10, 20);
-  doc.autoTable({ startY: 24, head: [cab], body: linhas, styles: { fontSize: 7.5, cellPadding: 1.4, valign: 'top' }, headStyles: { fillColor: [20, 48, 90] }, columnStyles: { 0: { cellWidth: 18 }, 1: { cellWidth: 22 } }, margin: { left: 10, right: 10 } });
-  doc.save(`Diario de obra - ${o.nome.replace(/[\\/:*?"<>|]/g, '-')}.pdf`);
 }
 
 /* =====================================================================
@@ -462,17 +373,7 @@ export const acoesGestao = {
       };
     });
   },
-  diarioNovo() { const o = obraAtual(); const c = contexto(o); const hoje = todayISO(); const ex = (o.diario || []).find((x) => x.data === hoje); dialogoDiario(o, c, ex ? JSON.parse(JSON.stringify(ex)) : novoDiario(hoje, usuario())); },
-  async diarioNovoData() {
-    const o = obraAtual(); const c = contexto(o);
-    const v = await formDialog({ title: 'Registro do diário', ok: 'Continuar', fields: [{ name: 'data', label: 'Data', type: 'date', required: true, value: todayISO() }] });
-    if (!v) return;
-    const ex = (o.diario || []).find((x) => x.data === v.data);
-    dialogoDiario(o, c, ex ? JSON.parse(JSON.stringify(ex)) : novoDiario(v.data, usuario()));
-  },
-  diarioEditar(d) { const o = obraAtual(); const c = contexto(o); dialogoDiario(o, c, JSON.parse(JSON.stringify(o.diario.find((x) => x.id === d.id)))); },
-  async diarioPdf() { const o = obraAtual(); try { toast('Gerando PDF…'); await exportarDiario(o, contexto(o), 'pdf'); } catch (e) { toast(e.message); } },
-  async diarioXlsx() { const o = obraAtual(); try { await exportarDiario(o, contexto(o), 'xlsx'); } catch (e) { toast(e.message); } },
+  diarioAbrir(d) { location.hash = `#/diario/${d.obra}/rdo/${d.id}`; },
   compNovo(d) { const o = obraAtual(); dialogoCompromisso(o, contexto(o), { id: uid(), tipo: d.t, status: d.t === 'Contrato' ? 'Aprovado' : 'Em cotação', categoria: d.t === 'Contrato' ? 'Serviço terceirizado' : 'Material', aditivos: [] }, true); },
   compEditar(d) { const o = obraAtual(); dialogoCompromisso(o, contexto(o), o.compromissos.find((x) => x.id === d.id), false); },
   despNova() { const o = obraAtual(); dialogoDespesa(o, contexto(o), { id: uid(), categoria: 'Material', pagamentos: [] }, true); },
@@ -482,5 +383,4 @@ export const acoesGestao = {
 export const mudancasGestao = {
   painelEtapa(d, el) { ui.painelEtapa = el.value; queueRender(); },
   medSoPeriodo(d, el) { ui.medSoPeriodo = el.checked; queueRender(); },
-  diarioF(d, el) { ui.diarioFiltro = { ...(ui.diarioFiltro || {}), [d.f]: el.value }; queueRender(); },
 };

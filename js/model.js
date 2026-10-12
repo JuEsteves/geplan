@@ -65,6 +65,12 @@ export function garantirCamposObra(o) {
   o.distribuicaoPadrao ??= 'linear'; o.pesoFisico ??= 'hh';
   o.calendario ||= { dias: [1, 2, 3, 4, 5], feriados: [] }; o.calendario.tipo ??= 'uteis';
   for (const k of ['historico', 'revisoesOrcamento', 'medicoesAtiv', 'diario', 'compromissos', 'despesas', 'medicoes', 'rdo']) o[k] ||= [];
+  // diário antigo (um registro por dia) → RDO de um dia, com número pela ordem das datas e situação "preenchendo"
+  let n = Math.max(0, ...o.diario.map((d) => Number(d.numero) || 0));
+  for (const d of [...o.diario].sort((a, b) => String(a.data).localeCompare(String(b.data)))) {
+    d.dataFim ||= d.data; d.status ||= 'preenchendo'; if (!d.numero) d.numero = ++n;
+    for (const k of ['equipe', 'servicos', 'ocorrencias', 'equipamentosLista', 'materiaisLista']) d[k] ||= [];
+  }
   return o;
 }
 

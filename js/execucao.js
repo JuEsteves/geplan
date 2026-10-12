@@ -92,37 +92,101 @@ function sincronizarAtividade(obra, a) {
   a.fimReal = ms.find((m) => m.pct >= 100)?.data || '';
 }
 
-/* ---------- diário de obra ---------- */
+/* ---------- diário de obra (RDO) ----------
+ * Relatório por PERÍODO (data inicial e final; um dia só quando forem iguais). Períodos da mesma obra não se
+ * sobrepõem. Número sequencial por obra. Situação: preenchendo → em revisão → aprovado (ou devolvido para correção);
+ * aprovado não é editado (precisa ser reaberto por quem aprova). No modo nuvem, número, situação e aprovação são
+ * gravados pelo banco (migração 0008); aqui o número é provisório até a sincronização.
+ */
+export const STATUS_RDO = {
+  preenchendo: { rotulo: 'Preenchendo', cls: 'warn' }, revisao: { rotulo: 'Em revisão', cls: 'info' },
+  devolvido: { rotulo: 'Devolvido para correção', cls: 'crit' }, aprovado: { rotulo: 'Aprovado', cls: 'good' },
+};
+export const SITUACOES_ATIVIDADE = { em_andamento: 'Em andamento', concluida: 'Concluída', iniciada: 'Iniciada', paralisada: 'Paralisada', nao_iniciada: 'Não iniciada' };
+const br = (s) => (s ? s.split('-').reverse().join('/') : '');
+const DIAS = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+export const fimRdo = (d) => d.dataFim || d.data;
+export const periodoRdo = (d) => (fimRdo(d) !== d.data ? `${br(d.data)} até ${br(fimRdo(d))}` : br(d.data));
+export const diasDaSemanaRdo = (d) => {
+  const dia = (s) => DIAS[new Date(`${s}T12:00:00`).getDay()];
+  return fimRdo(d) !== d.data ? `${dia(d.data)} até ${dia(fimRdo(d))}` : dia(d.data);
+};
+export const badgeRdo = (st) => `<span class="badge ${STATUS_RDO[st || 'preenchendo']?.cls || ''}">${STATUS_RDO[st || 'preenchendo']?.rotulo || st}</span>`;
 
-export function novoDiario(data, responsavel = '') {
+export function novoDiario(data, responsavel = '', obra = null) {
   return {
-    id: uid(), data, responsavel, clima: { manha: 'Bom', tarde: 'Bom' }, praticavel: true,
-    equipe: [], servicos: [], materiais: '', equipamentos: '', visitas: '', reunioes: '',
-    ocorrencias: [], observacoes: '', criadoEm: new Date().toISOString(), atualizadoEm: new Date().toISOString(),
+    id: uid(), numero: proximoNumeroRdo(obra), data, dataFim: data, status: 'preenchendo', responsavel,
+    clima: { manha: 'Bom', tarde: 'Bom' }, praticavel: true, condicoes: '', justificativa: '',
+    equipe: [], equipamentosLista: [], servicos: [], ocorrencias: [], materiaisLista: [],
+    materiais: '', equipamentos: '', visitas: '', reunioes: '', observacoes: '',
+    criadoEm: new Date().toISOString(), atualizadoEm: new Date().toISOString(),
   };
 }
+export const proximoNumeroRdo = (obra) => Math.max(0, ...((obra?.diario || []).map((x) => Number(x.numero) || 0))) + 1;
 
-/** Salva o registro do dia (um por data). */
+/** Relatório da obra que cobre parte do período (ou null). */
+export function sobreposicaoRdo(obra, d) {
+  const ini = d.data, fim = fimRdo(d);
+  return (obra.diario || []).find((x) => x.id !== d.id && x.data <= fim && fimRdo(x) >= ini) || null;
+}
+
+/** Salva o relatório (valida o período). */
 export function salvarDiario(obra, d, usuario = '') {
   obra.diario ||= [];
-  const outro = obra.diario.find((x) => x.data === d.data && x.id !== d.id);
-  if (outro) throw new Error(`Já existe registro no diário para ${d.data.split('-').reverse().join('/')}. Edite o registro existente.`);
+  if (!d.data) throw new Error('Informe a data do relatório.');
+  if (!d.dataFim) d.dataFim = d.data;
+  if (d.dataFim < d.data) throw new Error('O fim do período é antes do início.');
+  const atual = obra.diario.find((x) => x.id === d.id);
+  if (atual?.status === 'aprovado') throw new Error(`O relatório nº ${atual.numero} está aprovado: para alterar, ele precisa ser reaberto por quem aprova.`);
+  const outro = sobreposicaoRdo(obra, d);
+  if (outro) throw new Error(`O relatório nº ${outro.numero || '—'} (${periodoRdo(outro)}) já cobre parte desse período.`);
+  d.numero ||= proximoNumeroRdo(obra);
+  d.status ||= 'preenchendo';
   d.atualizadoEm = new Date().toISOString();
   const i = obra.diario.findIndex((x) => x.id === d.id);
   if (i >= 0) obra.diario[i] = d; else obra.diario.push(d);
   obra.diario.sort((a, b) => b.data.localeCompare(a.data));
-  registrar(obra, i >= 0 ? 'Diário alterado' : 'Diário registrado', d.data.split('-').reverse().join('/'), usuario);
+  registrar(obra, i >= 0 ? 'Diário alterado' : 'Diário registrado', `RDO nº ${d.numero} — ${periodoRdo(d)}`, usuario);
   return d;
 }
 
-/** Filtra registros do diário (período, responsável, atividade, tipo de ocorrência, texto). */
-export function filtrarDiario(obra, { de = '', ate = '', responsavel = '', atividadeId = '', tipo = '', texto = '' } = {}) {
+/** Atividades da EAP dentro de uma fase (a própria e todas abaixo dela). */
+export function idsDaFase(obra, faseId) {
+  const ids = new Set([faseId]);
+  let mudou = true;
+  while (mudou) { mudou = false; for (const a of obra.eap || []) if (a.parentId && ids.has(a.parentId) && !ids.has(a.id)) { ids.add(a.id); mudou = true; } }
+  return ids;
+}
+
+/** Filtra relatórios (período que se cruza, responsável, situação, atividade, fase, ocorrência, texto). */
+export function filtrarDiario(obra, { de = '', ate = '', responsavel = '', atividadeId = '', faseId = '', tipo = '', status = '', texto = '' } = {}) {
   const t = texto.trim().toLowerCase();
-  return (obra.diario || []).filter((d) => (!de || d.data >= de) && (!ate || d.data <= ate)
+  const daFase = faseId ? idsDaFase(obra, faseId) : null;
+  return (obra.diario || []).filter((d) => (!de || fimRdo(d) >= de) && (!ate || d.data <= ate)
     && (!responsavel || (d.responsavel || '').toLowerCase().includes(responsavel.toLowerCase()))
-    && (!atividadeId || d.servicos.some((s) => s.atividadeId === atividadeId))
-    && (!tipo || d.ocorrencias.some((o) => o.tipo === tipo))
+    && (!status || (d.status || 'preenchendo') === status)
+    && (!atividadeId || (d.servicos || []).some((s) => s.atividadeId === atividadeId))
+    && (!daFase || (d.servicos || []).some((s) => s.atividadeId && daFase.has(s.atividadeId)))
+    && (!tipo || (d.ocorrencias || []).some((o) => o.tipo === tipo))
     && (!t || JSON.stringify(d).toLowerCase().includes(t)));
+}
+
+/** Prazos da obra (dias corridos): contratual = início → previsão de término; decorrido até hoje; a vencer. */
+export function prazosObra(obra, hoje) {
+  const ini = obra.inicioReal || obra.inicio, fim = obra.terminoPlanejado;
+  if (!ini || !fim) return null;
+  const dias = (a, b) => Math.round((new Date(`${b}T12:00:00`) - new Date(`${a}T12:00:00`)) / 86400000);
+  const contratual = dias(ini, fim);
+  if (contratual <= 0) return null;
+  const decorrido = Math.max(0, Math.min(contratual, dias(ini, hoje)));
+  return { inicio: ini, termino: fim, contratual, decorrido, aVencer: Math.max(0, dias(hoje, fim)), pct: Math.round((decorrido / contratual) * 100), vencido: hoje > fim };
+}
+
+/** Avanço medido de uma atividade até a data (última medição até ela; sem medição, o % da atividade se não houver data). */
+export function avancoAte(obra, atividadeId, data) {
+  const ms = medicoesDe(obra, atividadeId).filter((m) => m.data <= data);
+  if (ms.length) return Number(ms[ms.length - 1].pct);
+  return null;
 }
 
 /** Impedimentos/interferências ainda não resolvidos. */

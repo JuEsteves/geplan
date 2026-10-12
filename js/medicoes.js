@@ -8,6 +8,7 @@ import { esc, I, ui, toast, ask, info, formDialog, queueRender, parseNum, fmtIn 
 import { fmtBRL, isoBR, todayISO, fmtNum } from './schedule.js';
 import { configurado as nuvemConfigurada, sb, erroBanco } from './nuvem/supabase.js';
 import * as nuvem from './nuvem/nuvem.js';
+import { invalidarALancar } from './nuvem/aLancar.js';
 import { pode, liberado } from './permissoes.js';
 import { calcular } from './calculo.js';
 import { quantidadePlanejada, medicoesDe, idsDaFase } from './execucao.js';
@@ -68,6 +69,7 @@ async function carregarEventos(sid) {
 }
 export function limparMedicoes() { Object.assign(M, vazio()); }
 async function depois(sid, { obras = false } = {}) {
+  invalidarALancar();
   if (obras) { await nuvem.enviar().catch(() => {}); if (!nuvem.pendente()) await nuvem.baixar().catch(() => {}); }
   await carregarMedicoes(true);
   if (sid) await carregarEventos(sid).catch(() => {});

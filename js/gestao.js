@@ -4,7 +4,8 @@ import * as store from './store.js';
 import { savedUser } from './drive.js';
 import { uid, registrar, CATEGORIAS_CUSTO, TIPOS_OCORRENCIA } from './model.js';
 import { avanco, fracPlanejada, pctRealAte, incorridoAte } from './curvaS.js';
-import { resumoOrcamento, resumoCustos, totalCompromisso, pagoDespesa, despesaDuplicada, valorAgregado } from './financeiro.js';
+import { resumoOrcamento, resumoCustos, custosPorFase, totalCompromisso, compromissoEfetivo, COMPROMISSO_ENCERRADO, pagoDespesa, despesaDuplicada, valorAgregado } from './financeiro.js';
+import { medicoesALancar } from './nuvem/aLancar.js';
 import { quantidadePlanejada, metodoMedicao, medicoesDe, registrarMedicao, removerMedicao, pendenciasAbertas, periodoRdo, badgeRdo } from './execucao.js';
 import { toDay, toISO, fmtBR, isoBR, todayDay, todayISO, fmtNum, fmtBRL } from './schedule.js';
 import { esc, I, ui, toast, ask, info, formDialog, commit, queueRender, parseNum, fmtIn } from './ui.js';
@@ -50,7 +51,7 @@ export function tabPainel(c) {
   }
   const av = avanco(o, calc, cron, hoje);
   const orc = resumoOrcamento(o, calc);
-  const custos = resumoCustos(o);
+  const custos = resumoCustos(o, { aLancar: medicoesALancar(o.id) });
   const va = valorAgregado({ bac: av.finTotal, pv: av.finPlan, ev: av.valorAgregado, ac: incorridoAte(o, hoje) });
   const fl = folhas(c);
   const naEtapa = (n) => !etapaF || raizId(c, n.a) === etapaF;
@@ -202,30 +203,63 @@ export function tabDiario(c) {
    FINANCEIRO E SUPRIMENTOS
    ===================================================================== */
 const STATUS_COMP = ['Em cotação', 'Aprovado', 'Entregue parcialmente', 'Entregue', 'Encerrado', 'Cancelado'];
+/** Tabela de custos por fase (orçado × valor agregado × comprometido × incorrido × pago × a lançar). */
+function tabelaCustosFase(c, pf, diaEv) {
+  const { o, calc } = c;
+  const evF = new Map(), alocF = new Map();
+  for (const n of folhas(c)) {
+    const rz = raizId(c, n.a), A = calc.ativ.get(n.id);
+    alocF.set(rz, (alocF.get(rz) || 0) + A.custo);
+    evF.set(rz, (evF.get(rz) || 0) + A.custo * pctRealAte(o, n.a, diaEv) / 100);
+  }
+  const pct = (v, t) => (t > 0 ? `${fmtNum(v / t * 100, 0)}%` : '—');
+  const barra = (fis, fin) => `<div class="progress duo" title="Físico ${fis == null ? '—' : fmtNum(fis, 0) + '%'} · financeiro ${fin == null ? '—' : fmtNum(fin, 0) + '%'}"><div style="width:${Math.min(100, fin || 0)}%" class="p"></div><div style="width:${Math.min(100, fis || 0)}%" class="r"></div></div>`;
+  let evTot = 0;
+  const linhas = pf.fases.map((f) => {
+    const ev = f.id ? evF.get(f.id) || 0 : null, aloc = f.id ? alocF.get(f.id) || 0 : 0;
+    if (ev) evTot += ev;
+    const fis = f.id && aloc > 0 ? ev / aloc * 100 : null, fin = f.orcado > 0 ? f.incorrido / f.orcado * 100 : null;
+    return `<tr${f.id ? '' : ' class="sem-fase"'}><td>${f.id ? `${esc(f.codigo)} ${esc(f.descricao)}` : `<b>${esc(f.descricao)}</b>`}</td>
+      <td class="num nowrap">${fmtBRL(f.orcado)}</td><td class="num nowrap">${ev == null ? '—' : fmtBRL(ev)}</td>
+      <td class="num nowrap">${fmtBRL(f.comprometido)}</td><td class="num nowrap">${fmtBRL(f.incorrido)}<div class="small muted">${pct(f.incorrido, f.orcado)} do orçado</div></td>
+      <td class="num nowrap">${fmtBRL(f.pago)}</td><td class="num nowrap">${fmtBRL(f.incorrido - f.pago)}</td><td class="num nowrap">${f.aLancar ? fmtBRL(f.aLancar) : '—'}</td>
+      <td style="min-width:110px">${f.id ? barra(fis, fin) : ''}<div class="small muted">${fis == null ? '' : `físico ${fmtNum(fis, 0)}%`}${fis != null && fin != null ? ' · ' : ''}${fin == null ? '' : `financ. ${fmtNum(fin, 0)}%`}</div></td></tr>`;
+  }).join('');
+  const t = pf.totais;
+  return `<div class="card table-wrap"><table class="data custos-fase"><thead><tr><th>Fase da EAP</th><th class="num">Orçado</th><th class="num">Valor agregado</th><th class="num">Comprometido</th><th class="num">Incorrido</th><th class="num">Pago</th><th class="num">A pagar</th><th class="num">A lançar</th><th>Físico × financeiro</th></tr></thead>
+    <tbody>${linhas || '<tr><td colspan="9" class="muted">Monte as fases da EAP para ver os custos por fase.</td></tr>'}</tbody>
+    <tfoot><tr><th>Total</th><th class="num nowrap">${fmtBRL(t.orcado)}</th><th class="num nowrap">${fmtBRL(evTot)}</th><th class="num nowrap">${fmtBRL(t.comprometido)}</th><th class="num nowrap">${fmtBRL(t.incorrido)}</th><th class="num nowrap">${fmtBRL(t.pago)}</th><th class="num nowrap">${fmtBRL(t.incorrido - t.pago)}</th><th class="num nowrap">${t.aLancar ? fmtBRL(t.aLancar) : '—'}</th><th></th></tr></tfoot></table></div>`;
+}
+
+// etapas raiz; um nó mais interno já gravado (ex.: vindo de Suprimentos) continua na lista para não se perder ao salvar
+const opcoesFases = (o, sel) => `<option value="">— sem fase —</option>${o.eap.filter((a) => !a.parentId || a.id === sel).map((a) => `<option value="${a.id}" ${a.id === sel ? 'selected' : ''}>${esc(a.codigo)} ${esc(a.descricao)}</option>`).join('')}`;
+const nomeFase = (o, id) => { const a = id && o.eap.find((x) => x.id === id); return a ? `${a.codigo} ${a.descricao}` : ''; };
+
 export function tabFinanceiro(c) {
   const { o, calc } = c;
   const orc = resumoOrcamento(o, calc);
-  const r = resumoCustos(o);
+  const aLancar = medicoesALancar(o.id);
+  const r = resumoCustos(o, { aLancar });
   const hoje = todayDay();
   const av = avanco(o, calc, c.cron, hoje);
   const va = valorAgregado({ bac: av.finTotal, pv: av.finPlan, ev: av.valorAgregado, ac: incorridoAte(o, hoje) });
+  const corte = ui.custosAte ? toDay(ui.custosAte) : null;
+  const cat = ui.custosCat || '';
+  const pf = custosPorFase(o, { totalItem: (id) => calc.itens.get(id)?.total || 0, ateDia: corte, aLancar, categoria: cat });
   const itemNome = (id) => { const it = o.orcamento.find((x) => x.id === id); return it ? `${it.codigo} ${calc.itens.get(it.id).comp?.descricao || it.descricao || ''}` : ''; };
-  const etapaDe = (x) => (x.itemId ? o.orcamento.find((i) => i.id === x.itemId)?.etapa : x.atividadeId ? c.porId.get(raizId(c, c.porId.get(x.atividadeId) || { parentId: null, id: '' }))?.descricao : '') || '(sem vínculo)';
-  const porEtapa = new Map();
-  for (const it of o.orcamento) { const e = it.etapa || '(sem etapa)'; const P = porEtapa.get(e) || { orc: 0, inc: 0 }; P.orc += calc.itens.get(it.id).total; porEtapa.set(e, P); }
-  for (const d of o.despesas || []) { const e = etapaDe(d); const P = porEtapa.get(e) || { orc: 0, inc: 0 }; P.inc += Number(d.valor) || 0; porEtapa.set(e, P); }
   const comps = (o.compromissos || []).map((k) => {
-    const usado = r.porComp.get(k.id) || 0, tot = totalCompromisso(k);
+    const usado = r.porComp.get(k.id) || 0, tot = totalCompromisso(k), efetivo = compromissoEfetivo(k, usado);
+    const encerrado = COMPROMISSO_ENCERRADO.includes(k.status);
     return `<tr><td><span class="badge">${esc(k.tipo === 'Contrato' ? 'Contrato' : 'Pedido')}</span> ${esc(k.numero || '')}</td><td>${esc(k.fornecedor || '')}<div class="small muted">${esc(k.objeto || '')}</div></td>
-      <td class="small">${esc(k.categoria || '')}${k.itemId ? `<div class="muted">${esc(itemNome(k.itemId))}</div>` : ''}</td>
-      <td class="num nowrap">${fmtBRL(tot)}${(k.aditivos || []).length ? `<div class="small muted">${k.aditivos.length} aditivo(s)</div>` : ''}</td><td class="num nowrap">${fmtBRL(usado)}</td><td class="num nowrap">${fmtBRL(Math.max(0, tot - usado))}</td>
+      <td class="small">${esc(k.categoria || '')}${k.faseId ? `<div class="muted">Fase ${esc(nomeFase(o, k.faseId))}</div>` : ''}${k.itemId ? `<div class="muted">${esc(itemNome(k.itemId))}</div>` : ''}</td>
+      <td class="num nowrap">${fmtBRL(tot)}${(k.aditivos || []).length ? `<div class="small muted">${k.aditivos.length} aditivo(s)</div>` : ''}${encerrado ? `<div class="small muted" title="${esc(k.status)}: conta no comprometido só o que já foi incorrido">conta ${fmtBRL(efetivo)}</div>` : ''}</td><td class="num nowrap">${fmtBRL(usado)}</td><td class="num nowrap">${fmtBRL(Math.max(0, efetivo - usado))}</td>
       <td>${k.tipo === 'Pedido de compra' ? `<span class="badge ${k.status === 'Entregue' ? 'good' : 'warn'}">${esc(k.status || '')}</span>${k.dataNecessaria ? `<div class="small muted">necessário ${isoBR(k.dataNecessaria)}</div>` : ''}${k.quantidade ? `<div class="small muted">receb. ${fmtNum(k.quantidadeRecebida || 0, 2)} de ${fmtNum(k.quantidade, 2)} ${esc(k.unidade || '')}</div>` : ''}` : `<span class="badge">${esc(k.status || '')}</span>`}</td>
       <td class="nowrap"><button class="icon-btn" data-act="compEditar" data-id="${k.id}" title="Editar">${I.more}</button></td></tr>`;
   }).join('');
   const desp = [...(o.despesas || [])].sort((a, b) => b.data.localeCompare(a.data)).map((d) => {
     const pago = pagoDespesa(d), k = (o.compromissos || []).find((x) => x.id === d.compromissoId);
     return `<tr><td class="nowrap">${isoBR(d.data)}</td><td>${esc(d.documento || '')}</td><td>${esc(d.fornecedor || '')}<div class="small muted">${esc(d.descricao || '')}</div></td>
-      <td class="small">${esc(d.categoria || '')}${k ? `<div class="muted">${esc(k.tipo)} ${esc(k.numero || k.fornecedor || '')}</div>` : ''}${d.itemId ? `<div class="muted">${esc(itemNome(d.itemId))}</div>` : ''}</td>
+      <td class="small">${esc(d.categoria || '')}${d.faseId ? `<div class="muted">Fase ${esc(nomeFase(o, d.faseId))}</div>` : ''}${k ? `<div class="muted">${esc(k.tipo)} ${esc(k.numero || k.fornecedor || '')}</div>` : ''}${d.itemId ? `<div class="muted">${esc(itemNome(d.itemId))}</div>` : ''}</td>
       <td class="num nowrap">${fmtBRL(d.valor)}</td><td class="num nowrap">${fmtBRL(pago)}</td><td>${pago >= (Number(d.valor) || 0) - 0.005 ? '<span class="badge good">Paga</span>' : `<span class="badge warn">A pagar</span>${d.vencimento ? `<div class="small muted">vence ${isoBR(d.vencimento)}</div>` : ''}`}</td>
       <td class="nowrap"><button class="icon-btn" data-act="despEditar" data-id="${d.id}" title="Editar / pagamentos">${I.more}</button></td></tr>`;
   }).join('');
@@ -234,22 +268,29 @@ export function tabFinanceiro(c) {
     <div class="kpis">
       ${kpi('Custo orçado', fmtBRL(orc.custoDireto), isFinite(orc.bdi) && orc.bdi ? `venda ${fmtBRL(orc.precoVenda)}` : 'sem BDI')}
       ${kpi('Valor contratado (cliente)', o.valorContratado ? fmtBRL(o.valorContratado) : '—')}
-      ${kpi('Comprometido', fmtBRL(r.comprometido), 'contratos + pedidos + despesas avulsas')}
+      ${kpi('Comprometido', fmtBRL(r.comprometido), r.aLancar ? 'contratos + pedidos + despesas avulsas + medições a lançar' : 'contratos + pedidos + despesas avulsas')}
       ${kpi('Incorrido', fmtBRL(r.incorrido), 'despesas lançadas')}
       ${kpi('Pago', fmtBRL(r.pago), `a pagar ${fmtBRL(r.saldoAPagar)}`)}
-      ${kpi('Saldo de contratos a incorrer', fmtBRL(r.aIncorrer))}
+      ${kpi('A incorrer', fmtBRL(r.aIncorrer), 'saldo de contratos e pedidos + medições a lançar')}
+      ${r.aLancar ? kpi('Medições a lançar', fmtBRL(r.aLancar), 'aprovadas, ainda sem despesa no Financeiro') : ''}
       ${kpi('Previsão de custo final (EAC)', fmtBRL(va.eac), va.cpi != null ? `CPI ${fmtNum(va.cpi, 2)}` : '')}
     </div>
     ${r.alertas.length ? `<div class="alert err">${r.alertas.map(esc).join('<br>')}</div>` : ''}
+    <div class="row" id="secao-fases" style="flex-wrap:wrap;gap:10px;align-items:flex-end"><h2 style="flex:1;min-width:200px;margin:0">Custos por fase</h2>
+      <label class="field" style="max-width:170px">Data de corte<input type="date" data-chg="custosAte" value="${esc(ui.custosAte || '')}"></label>
+      <label class="field" style="max-width:200px">Categoria<select data-chg="custosCat"><option value="">Todas</option>${CATEGORIAS_CUSTO.map((x) => `<option ${x === cat ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
+      ${corte != null || cat ? '<button class="btn sm" data-act="custosLimpar">Limpar filtros</button>' : ''}</div>
+    ${pf.semFase ? `<div class="alert warn">${pf.semFase} lançamento(s) sem fase (contrato/despesa sem fase, sem item do orçamento ou com item sem vínculo de 100% com a EAP) — os valores aparecem na linha <b>Sem fase</b>. Informe a fase no contrato ou na despesa para distribuí-los.</div>` : ''}
+    ${tabelaCustosFase(c, pf, corte ?? hoje)}
+    <div class="muted small"><b>Orçado</b> = custo direto (sem BDI) repartido pelos vínculos com a EAP. <b>Valor agregado</b> = custo das atividades × % executado (avanço físico) — não se soma com o dinheiro. <b>A lançar</b> = medições aprovadas sem despesa (só para quem vê valores). Fase de cada valor: a informada → o item do orçamento → o contrato/pedido → "Sem fase". Barra: escura = físico, clara = financeiro (incorrido ÷ orçado).${cat ? ' Filtro de categoria não muda o orçado nem o valor agregado.' : ''}${corte != null ? ` Valores até ${isoBR(ui.custosAte)}.` : ''}</div>
     <div class="row" id="secao-compras"><h2 style="flex:1">Contratos e pedidos de compra</h2><button class="btn sm" data-act="compNovo" data-t="Contrato">${I.plus} Contrato</button><button class="btn sm primary" data-act="compNovo" data-t="Pedido de compra">${I.plus} Pedido de compra</button></div>
     ${comps ? `<div class="card table-wrap"><table class="data"><thead><tr><th>Documento</th><th>Fornecedor / objeto</th><th>Categoria</th><th class="num">Valor + aditivos</th><th class="num">Incorrido</th><th class="num">Saldo</th><th>Status</th><th></th></tr></thead><tbody>${comps}</tbody></table></div>` : vazioCard('Nenhum contrato ou pedido. Registre aqui os compromissos assumidos com fornecedores e empreiteiros.')}
     <div class="row"><h2 style="flex:1">Despesas (notas, medições de terceiros, recibos)</h2><button class="btn sm primary" data-act="despNova">${I.plus} Despesa</button></div>
     ${desp ? `<div class="card table-wrap"><table class="data"><thead><tr><th>Data</th><th>Documento</th><th>Fornecedor / descrição</th><th>Categoria / vínculo</th><th class="num">Valor</th><th class="num">Pago</th><th>Situação</th><th></th></tr></thead><tbody>${desp}</tbody></table></div>` : vazioCard('Nenhuma despesa lançada.')}
     <div class="grid-2">
-      <div class="card table-wrap"><table class="data"><thead><tr><th>Etapa</th><th class="num">Orçado</th><th class="num">Incorrido</th><th class="num">%</th></tr></thead><tbody>${[...porEtapa.entries()].map(([e, P]) => `<tr><td>${esc(e)}</td><td class="num">${fmtBRL(P.orc)}</td><td class="num">${fmtBRL(P.inc)}</td><td class="num">${P.orc ? fmtNum(P.inc / P.orc * 100, 0) + '%' : '—'}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">Sem dados.</td></tr>'}</tbody></table></div>
       <div class="card table-wrap"><table class="data"><thead><tr><th>Categoria</th><th class="num">Incorrido</th></tr></thead><tbody>${r.porCategoria.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${fmtBRL(v)}</td></tr>`).join('') || '<tr><td colspan="2" class="muted">Sem despesas.</td></tr>'}</tbody></table></div>
     </div>
-    <div class="muted small"><b>Sem duplicidade:</b> a despesa vinculada a um contrato/pedido consome o saldo dele (não soma de novo no comprometido). Comprometido = contratos/pedidos com aditivos + despesas sem vínculo. Incorrido = despesas lançadas. EAC = realizado + (orçado − valor agregado).</div>
+    <div class="muted small"><b>Sem duplicidade:</b> a despesa vinculada a um contrato/pedido consome o saldo dele (não soma de novo no comprometido). Contrato/pedido cancelado ou encerrado conta só o que já foi incorrido. Medição aprovada entra como "a lançar" até virar despesa. Empreitada só entra quando medida. Material recebido sem nota não é custo (Suprimentos acompanha o pedido). EAC = realizado + (orçado − valor agregado).</div>
   </div>`;
 }
 
@@ -273,7 +314,11 @@ async function dialogoCompromisso(o, c, k, novo) {
       <label class="field">Quantidade recebida<input name="quantidadeRecebida" inputmode="decimal" value="${k.quantidadeRecebida != null ? fmtIn(k.quantidadeRecebida, 4) : ''}"></label>` : ''}
     </div>
     <label class="field">Objeto / descrição<input name="objeto" value="${esc(k.objeto || '')}"></label>
-    <label class="field">Item do orçamento relacionado<select name="itemId">${opcoesItens(o, c.calc, k.itemId)}</select></label>
+    <div class="grid-form">
+      <label class="field">Fase da EAP (opcional)<select name="faseId">${opcoesFases(o, k.faseId)}</select></label>
+      <label class="field">Item do orçamento relacionado<select name="itemId">${opcoesItens(o, c.calc, k.itemId)}</select></label>
+    </div>
+    <div class="muted small">Custos por fase: vale a fase informada; sem fase, o item do orçamento (pelos vínculos com a EAP).</div>
     <fieldset><legend>Aditivos</legend><div data-lista="ad">${(k.aditivos || []).map((a) => `<div class="row lin"><input type="date" name="adData" value="${a.data || ''}" style="width:auto"><input name="adValor" inputmode="decimal" placeholder="Valor (+/−)" value="${fmtIn(a.valor, 2)}" style="width:130px"><input name="adDesc" placeholder="Descrição" value="${esc(a.descricao || '')}" style="flex:1"><button type="button" class="icon-btn danger rm">${I.trash}</button></div>`).join('')}</div><button type="button" class="btn sm" data-add="ad">${I.plus} Aditivo</button></fieldset>
     ${!novo ? `<label class="check"><input type="checkbox" name="excluir"> Excluir este registro</label>` : ''}`, {
     largo: true,
@@ -293,7 +338,7 @@ async function dialogoCompromisso(o, c, k, novo) {
   }
   Object.assign(k, {
     numero: fd.get('numero').trim(), fornecedor: fd.get('fornecedor').trim(), fornecedorId: idDoFornecedorPorNome(fd.get('fornecedor')), categoria: fd.get('categoria'), valor: parseNum(fd.get('valor')) || 0,
-    status: fd.get('status'), data: fd.get('data'), objeto: fd.get('objeto').trim(), itemId: fd.get('itemId') || null,
+    status: fd.get('status'), data: fd.get('data'), objeto: fd.get('objeto').trim(), itemId: fd.get('itemId') || null, faseId: fd.get('faseId') || null,
     aditivos: [...form.querySelectorAll('[data-lista="ad"] .lin')].map((l) => ({ data: l.querySelector('[name=adData]').value, valor: parseNum(l.querySelector('[name=adValor]').value) || 0, descricao: l.querySelector('[name=adDesc]').value.trim() })).filter((a) => a.valor),
   });
   if (pedido) Object.assign(k, { dataNecessaria: fd.get('dataNecessaria'), quantidade: parseNum(fd.get('quantidade')), unidade: fd.get('unidade'), quantidadeRecebida: parseNum(fd.get('quantidadeRecebida')) });
@@ -314,7 +359,11 @@ async function dialogoDespesa(o, c, d, novo) {
     </div>
     <label class="field">Descrição<input name="descricao" value="${esc(d.descricao || '')}"></label>
     <label class="field">Contrato/pedido relacionado (evita contar duas vezes)<select name="compromissoId"><option value="">— sem contrato/pedido —</option>${(o.compromissos || []).map((k) => `<option value="${k.id}" ${k.id === d.compromissoId ? 'selected' : ''}>${esc(k.tipo)} ${esc(k.numero || '')} ${esc(k.fornecedor || '')}</option>`).join('')}</select></label>
-    <label class="field">Item do orçamento<select name="itemId">${opcoesItens(o, c.calc, d.itemId)}</select></label>
+    <div class="grid-form">
+      <label class="field">Fase da EAP (opcional)<select name="faseId">${opcoesFases(o, d.faseId)}</select></label>
+      <label class="field">Item do orçamento<select name="itemId">${opcoesItens(o, c.calc, d.itemId)}</select></label>
+    </div>
+    <div class="muted small">Custos por fase: vale a fase informada; sem fase, o item do orçamento, depois o contrato/pedido; sem nenhum, fica em "Sem fase".</div>
     <fieldset><legend>Pagamentos</legend><div data-lista="pg">${(d.pagamentos || []).map((p) => `<div class="row lin"><input type="date" name="pgData" value="${p.data || ''}" style="width:auto"><input name="pgValor" inputmode="decimal" value="${fmtIn(p.valor, 2)}" style="width:140px"><button type="button" class="icon-btn danger rm">${I.trash}</button></div>`).join('')}</div><button type="button" class="btn sm" data-add="pg">${I.plus} Pagamento</button></fieldset>
     ${!novo ? `<label class="check"><input type="checkbox" name="excluir"> Excluir esta despesa</label>` : ''}`, {
     largo: true,
@@ -326,6 +375,7 @@ async function dialogoDespesa(o, c, d, novo) {
         if (k.categoria) form.categoria.value = k.categoria;
         if (k.fornecedor && !form.fornecedor.value.trim()) form.fornecedor.value = k.fornecedor;
         if (k.itemId && !form.itemId.value) form.itemId.value = k.itemId;
+        if (k.faseId && !form.faseId.value) form.faseId.value = raizId(c, c.porId.get(k.faseId) || { id: k.faseId, parentId: null });
       });
       form.addEventListener('click', (e) => {
       if (e.target.closest('[data-add]')) {
@@ -346,6 +396,7 @@ async function dialogoDespesa(o, c, d, novo) {
   const nova = {
     ...d, data: fd.get('data'), documento: fd.get('documento').trim(), fornecedor: fd.get('fornecedor').trim(), fornecedorId: idDoFornecedorPorNome(fd.get('fornecedor')), valor: parseNum(fd.get('valor')) || 0,
     categoria: fd.get('categoria'), vencimento: fd.get('vencimento'), descricao: fd.get('descricao').trim(), compromissoId: fd.get('compromissoId') || null, itemId: fd.get('itemId') || null,
+    faseId: fd.get('faseId') || null,
     pagamentos: [...form.querySelectorAll('[data-lista="pg"] .lin')].map((l) => ({ data: l.querySelector('[name=pgData]').value, valor: parseNum(l.querySelector('[name=pgValor]').value) || 0 })).filter((p) => p.valor),
   };
   if (pagoDespesa(nova) > nova.valor + 0.005) return toast('Os pagamentos passam do valor da despesa.', 5000);
@@ -373,6 +424,7 @@ export const acoesGestao = {
       };
     });
   },
+  custosLimpar() { ui.custosAte = ''; ui.custosCat = ''; queueRender(); },
   diarioAbrir(d) { location.hash = `#/diario/${d.obra}/rdo/${d.id}`; },
   compNovo(d) { const o = obraAtual(); dialogoCompromisso(o, contexto(o), { id: uid(), tipo: d.t, status: d.t === 'Contrato' ? 'Aprovado' : 'Em cotação', categoria: d.t === 'Contrato' ? 'Serviço terceirizado' : 'Material', aditivos: [] }, true); },
   compEditar(d) { const o = obraAtual(); dialogoCompromisso(o, contexto(o), o.compromissos.find((x) => x.id === d.id), false); },
@@ -382,5 +434,7 @@ export const acoesGestao = {
 
 export const mudancasGestao = {
   painelEtapa(d, el) { ui.painelEtapa = el.value; queueRender(); },
+  custosAte(d, el) { ui.custosAte = el.value; queueRender(); },
+  custosCat(d, el) { ui.custosCat = el.value; queueRender(); },
   medSoPeriodo(d, el) { ui.medSoPeriodo = el.checked; queueRender(); },
 };

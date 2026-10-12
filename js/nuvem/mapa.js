@@ -284,7 +284,8 @@ export function obraParaLinhas(o, orgId) {
   for (const d of o.despesas || []) {
     L.expenses.push({ id: d.id, project_id: P, expense_date: data(d.data), document: txt(d.documento), supplier_name: txt(d.fornecedor),
       description: txt(d.descricao), category: d.categoria || 'Outro', contract_id: ref(d.compromissoId, compIds),
-      budget_item_id: ref(d.itemId, itensIds), supplier_id: d.fornecedorId || null, amount: arr(num0(d.valor), 2), due_date: data(d.vencimento) });
+      budget_item_id: ref(d.itemId, itensIds), supplier_id: d.fornecedorId || null, amount: arr(num0(d.valor), 2), due_date: data(d.vencimento),
+      phase_id: ref(d.faseId, ativIds) });
     for (const p of d.pagamentos || []) {
       L.payments.push({ id: idDe(p), expense_id: d.id, project_id: P, pay_date: data(p.data), amount: arr(num0(p.valor), 2) });
     }
@@ -404,6 +405,7 @@ export function linhasParaObra(L) {
     despesas: (L.expenses || []).map((d) => ({
       id: d.id, data: d.expense_date, documento: d.document, fornecedor: d.supplier_name, descricao: d.description, categoria: d.category,
       compromissoId: d.contract_id || null, itemId: d.budget_item_id || null, fornecedorId: d.supplier_id || null, valor: Number(d.amount), vencimento: dataBR(d.due_date),
+      faseId: d.phase_id || null,
       pagamentos: (pagamentos.get(d.id) || []).map((x) => ({ id: x.id, data: x.pay_date, valor: Number(x.amount) })),
     })),
     historico: [...(L.project_history || [])].sort((a, b) => txt(b.at).localeCompare(txt(a.at))).map((h) => ({

@@ -42,12 +42,24 @@ const AREAS_DO_PAPEL = {
   compras: ['compras', 'historico'],
   cliente: [],
 };
-export const podeGravar = (papel, tabela) => (AREAS_DO_PAPEL[papel] || []).includes(AREA[tabela]);
+/**
+ * O perfil grava esta tabela? `libs` = liberações efetivas da pessoa (migração 0007): a área de compras (contratos e
+ * pedidos) segue a liberação "comprar". Sem `libs`, vale o padrão do perfil (igual ao banco).
+ */
+export const podeGravar = (papel, tabela, libs = null) => {
+  if (AREA[tabela] === 'compras' && libs && papel !== 'cliente') return papel === 'admin' || libs.includes('comprar');
+  return (AREAS_DO_PAPEL[papel] || []).includes(AREA[tabela]);
+};
 /** Papel pode ler custos internos (orçamento, contratos)? */
 export const veCustos = (papel) => papel && papel !== 'cliente';
 
 /* ---------- comparação ---------- */
-const json = (r) => JSON.stringify(r, Object.keys(r).sort());
+// Texto estável da linha para comparar: chaves em ordem em TODOS os níveis. (Antes usava a lista de chaves do 1º
+// nível como filtro do JSON.stringify, o que descartava as chaves de objetos aninhados — jsonb como `extra`, modelos de
+// EAP, listas do RDO — e escondia alterações feitas só dentro deles.)
+const ordenado = (v) => (Array.isArray(v) ? v.map(ordenado)
+  : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, ordenado(v[k])])) : v);
+export const json = (r) => JSON.stringify(ordenado(r));
 
 /** Fotografia (tabela → chave → JSON) das linhas, para comparar depois. */
 export function fotografar(L, tabelas) {
@@ -90,12 +102,13 @@ function mudancasReais(t, x, snap) {
  * Envia as diferenças. Retorna { snap, enviados, ignorados, recusadas }. Se uma tabela falhar, para ali (as anteriores
  * ficam confirmadas no `snap` retornado em erro.snap) — a próxima tentativa recomeça do ponto certo.
  */
-async function aplicar(banco, L, snap, tabelas, papel) {
+async function aplicar(banco, L, snap, tabelas, papel, libs = null) {
   const novoSnap = structuredClone(snap || {});
   const dif = diferencas(L, snap, tabelas);
   const ignorados = [];
   let enviados = 0, recusadas = 0;
-  for (const [t, x] of Object.entries(dif)) if (!podeGravar(papel, t)) recusadas += mudancasReais(t, x, snap);
+  const podeGravar_ = (p, t) => podeGravar(p, t, libs);
+  for (const [t, x] of Object.entries(dif)) if (!podeGravar_(papel, t)) recusadas += mudancasReais(t, x, snap);
   const confirmar = (t, linhas, remover = false) => {
     novoSnap[t] ||= {};
     for (const r of linhas) {
@@ -108,7 +121,7 @@ async function aplicar(banco, L, snap, tabelas, papel) {
     for (const t of [...tabelas].reverse()) {
       const x = dif[t];
       if (!x?.removidas.length) continue;
-      if (!podeGravar(papel, t)) { ignorados.push(t); continue; }
+      if (!podeGravar_(papel, t)) { ignorados.push(t); continue; }
       const modo = REMOCAO[t];
       if (modo === 'apagar') await banco.remover(t, x.removidas);
       else if (modo === 'logica') await banco.atualizar(t, { deleted_at: new Date().toISOString() }, x.removidas);
@@ -119,7 +132,7 @@ async function aplicar(banco, L, snap, tabelas, papel) {
     for (const t of tabelas) {
       const x = dif[t];
       if (!x || !(x.novas.length || x.alteradas.length)) continue;
-      if (!podeGravar(papel, t)) { ignorados.push(t); continue; }
+      if (!podeGravar_(papel, t)) { ignorados.push(t); continue; }
       if (SO_INCLUSAO.has(t)) {
         if (x.novas.length) await banco.inserir(t, x.novas);
         confirmar(t, x.novas);
@@ -149,8 +162,8 @@ async function aplicar(banco, L, snap, tabelas, papel) {
 /* ---------- API ---------- */
 
 /** Envia uma obra (inclui a primeira gravação). `snap` = fotografia da última sincronização da obra (ou null). */
-export async function enviarObra(banco, obra, orgId, papel, snap) {
-  return aplicar(banco, obraParaLinhas(obra, orgId), snap, TABELAS_OBRA, papel);
+export async function enviarObra(banco, obra, orgId, papel, snap, libs = null) {
+  return aplicar(banco, obraParaLinhas(obra, orgId), snap, TABELAS_OBRA, papel, libs);
 }
 
 /** Envia a biblioteca da empresa (composições, feriados gerais, modelos de EAP). */

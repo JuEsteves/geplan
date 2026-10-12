@@ -249,18 +249,25 @@ export function obraParaLinhas(o, orgId) {
       responsible_label: txt(m.responsavel), status: 'aprovada', created_at: ts(m.criadoEm) });
   }
 
+  // Diário (RDO). Número, situação, aprovação e assinaturas NÃO são enviados: o banco grava (migração 0008).
   for (const d of o.diario || []) {
     const R = idDe(d);
-    L.daily_reports.push({ id: R, project_id: P, report_date: data(d.data), weather_morning: txt(d.clima?.manha || 'Bom'),
-      weather_afternoon: txt(d.clima?.tarde || 'Bom'), workable: d.praticavel !== false, materials: txt(d.materiais),
-      equipment: txt(d.equipamentos), visits: txt(d.visitas), meetings: txt(d.reunioes), notes: txt(d.observacoes),
+    L.daily_reports.push({ id: R, project_id: P, report_date: data(d.data), period_end: data(d.dataFim) || data(d.data),
+      weather_morning: txt(d.clima?.manha || 'Bom'), weather_afternoon: txt(d.clima?.tarde || 'Bom'), workable: d.praticavel !== false,
+      work_conditions: txt(d.condicoes), stoppage_reason: txt(d.justificativa),
+      equipment_list: (d.equipamentosLista || []).map((e) => ({ nome: txt(e.nome), qtd: num(e.qtd), horas: num(e.horas) })),
+      materials_list: (d.materiaisLista || []).map((m) => ({ descricao: txt(m.descricao), qtd: num(m.qtd), unidade: txt(m.unidade), fornecedor: txt(m.fornecedor), divergencia: txt(m.divergencia) })),
+      materials: txt(d.materiais), equipment: txt(d.equipamentos), visits: txt(d.visitas), meetings: txt(d.reunioes), notes: txt(d.observacoes),
       responsible_label: txt(d.responsavel), created_at: ts(d.criadoEm) });
     (d.equipe || []).forEach((e, i) => L.daily_report_crew.push({ id: idDe(e), daily_report_id: R, project_id: P,
-      role_name: txt(e.funcao), qty: Math.max(0, Math.round(num0(e.qtd))), position: i }));
+      role_name: txt(e.funcao), qty: Math.max(0, Math.round(num0(e.qtd))), kind: e.tipo === 'terceirizada' ? 'terceirizada' : 'propria',
+      company: txt(e.empresa), position: i }));
     (d.servicos || []).forEach((s, i) => L.daily_report_activities.push({ id: idDe(s), daily_report_id: R, project_id: P,
-      activity_id: ref(s.atividadeId, ativIds), description: txt(s.descricao), position: i }));
+      activity_id: ref(s.atividadeId, ativIds), description: txt(s.descricao), quantity: arr(num(s.qtd), 4), unit: txt(s.unidade),
+      situation: txt(s.situacao), notes: txt(s.obs), position: i }));
     (d.ocorrencias || []).forEach((x, i) => L.site_occurrences.push({ id: idDe(x), daily_report_id: R, project_id: P,
-      occurrence_type: x.tipo || 'Ocorrência', description: txt(x.descricao), resolved: !!x.resolvida, position: i }));
+      occurrence_type: x.tipo || 'Ocorrência', description: txt(x.descricao), resolved: !!x.resolvida, occurred_at: txt(x.hora),
+      actions: txt(x.providencias), responsible: txt(x.responsavel), position: i }));
   }
 
   const compIds = new Set((o.compromissos || []).map((k) => k.id));
@@ -268,7 +275,8 @@ export function obraParaLinhas(o, orgId) {
     L.contracts.push({ id: k.id, project_id: P, kind: String(k.tipo || '').startsWith('Pedido') ? 'Pedido' : 'Contrato',   // no app: "Pedido de compra" number: txt(k.numero),
       supplier_name: txt(k.fornecedor), category: k.categoria || 'Outro', amount: arr(num0(k.valor), 2), status: txt(k.status),
       contract_date: data(k.data), scope: txt(k.objeto), budget_item_id: ref(k.itemId, itensIds), supplier_id: k.fornecedorId || null, needed_date: data(k.dataNecessaria),
-      quantity: arr(num(k.quantidade), 4), unit: txt(k.unidade), quantity_received: arr(num(k.quantidadeRecebida), 4) });
+      quantity: arr(num(k.quantidade), 4), unit: txt(k.unidade), quantity_received: arr(num(k.quantidadeRecebida), 4),
+      phase_id: ref(k.faseId, ativIds) });
     for (const a of k.aditivos || []) {
       L.contract_amendments.push({ id: idDe(a), contract_id: k.id, project_id: P, amend_date: data(a.data), amount: arr(num0(a.valor), 2), description: txt(a.descricao) });
     }
@@ -367,16 +375,27 @@ export function linhasParaObra(L) {
       unidade: m.unit, qtdPlanejada: m.planned_qty == null ? null : Number(m.planned_qty), pct: Number(m.pct), obs: m.notes,
       responsavel: m.responsible_label, criadoEm: ts(m.created_at) })),
     diario: [...(L.daily_reports || [])].sort((a, b) => b.report_date.localeCompare(a.report_date)).map((d) => ({
-      id: d.id, data: d.report_date, responsavel: d.responsible_label, clima: { manha: d.weather_morning, tarde: d.weather_afternoon },
-      praticavel: d.workable, equipe: (crew.get(d.id) || []).sort(ordem).map((e) => ({ id: e.id, funcao: e.role_name, qtd: e.qty })),
-      servicos: (servs.get(d.id) || []).sort(ordem).map((s) => ({ id: s.id, atividadeId: s.activity_id || null, descricao: s.description })),
+      id: d.id, data: d.report_date, dataFim: d.period_end || d.report_date, responsavel: d.responsible_label,
+      clima: { manha: d.weather_morning, tarde: d.weather_afternoon }, praticavel: d.workable,
+      condicoes: d.work_conditions || '', justificativa: d.stoppage_reason || '',
+      equipe: (crew.get(d.id) || []).sort(ordem).map((e) => ({ id: e.id, funcao: e.role_name, qtd: e.qty, tipo: e.kind || 'propria', empresa: e.company || '' })),
+      equipamentosLista: (d.equipment_list || []).map((e) => ({ nome: e.nome || '', qtd: e.qtd ?? null, horas: e.horas ?? null })),
+      servicos: (servs.get(d.id) || []).sort(ordem).map((s) => ({ id: s.id, atividadeId: s.activity_id || null, descricao: s.description,
+        qtd: s.quantity == null ? null : Number(s.quantity), unidade: s.unit || '', situacao: s.situation || '', obs: s.notes || '' })),
+      materiaisLista: (d.materials_list || []).map((m) => ({ descricao: m.descricao || '', qtd: m.qtd ?? null, unidade: m.unidade || '', fornecedor: m.fornecedor || '', divergencia: m.divergencia || '' })),
       materiais: d.materials, equipamentos: d.equipment, visitas: d.visits, reunioes: d.meetings,
-      ocorrencias: (ocs.get(d.id) || []).sort(ordem).map((x) => ({ id: x.id, tipo: x.occurrence_type, descricao: x.description, resolvida: x.resolved })),
-      observacoes: d.notes, criadoEm: ts(d.created_at), atualizadoEm: ts(d.updated_at || d.created_at) })),
+      ocorrencias: (ocs.get(d.id) || []).sort(ordem).map((x) => ({ id: x.id, tipo: x.occurrence_type, descricao: x.description, resolvida: x.resolved,
+        hora: x.occurred_at || '', providencias: x.actions || '', responsavel: x.responsible || '' })),
+      observacoes: d.notes, criadoEm: ts(d.created_at), atualizadoEm: ts(d.updated_at || d.created_at),
+      // gravados só pelo banco (ações do relatório)
+      numero: d.number || null, status: d.status || 'preenchendo', notaRevisao: d.review_note || '',
+      assinaturaResponsavel: d.filled_signature_path || '', assinadoPor: d.filled_signed_label || '', assinadoEm: ts(d.filled_signed_at) || '',
+      aprovadoPor: d.approved_label || '', aprovadoEm: ts(d.approved_at) || '', assinaturaAprovador: d.approved_signature_path || '' })),
     compromissos: (L.contracts || []).map((k) => {
       const c = {
         id: k.id, tipo: k.kind === 'Pedido' ? 'Pedido de compra' : 'Contrato', numero: k.number, fornecedor: k.supplier_name, categoria: k.category, valor: Number(k.amount),
         status: k.status, data: dataBR(k.contract_date), objeto: k.scope, itemId: k.budget_item_id || null, fornecedorId: k.supplier_id || null,
+        faseId: k.phase_id || null,
         aditivos: (aditivos.get(k.id) || []).map((a) => ({ id: a.id, data: dataBR(a.amend_date), valor: Number(a.amount), descricao: a.description })),
       };
       if (k.kind === 'Pedido') Object.assign(c, { dataNecessaria: dataBR(k.needed_date), quantidade: k.quantity == null ? null : Number(k.quantity), unidade: k.unit, quantidadeRecebida: k.quantity_received == null ? null : Number(k.quantity_received) });

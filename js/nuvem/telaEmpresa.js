@@ -4,6 +4,9 @@ import * as store from '../store.js';
 import * as conta from './conta.js';
 import * as nuvem from './nuvem.js';
 import { esc, toast, ask, formDialog, info, queueRender } from '../ui.js';
+import { LIBERACOES, LIBERACOES_PADRAO, liberacoesDe } from '../liberacoes.js';
+import { enviarArquivo, urlTemporaria, validarArquivo, TIPOS_IMAGEM } from './arquivos.js';
+import { carregarDiarioNuvem } from '../diario.js';
 
 export const PAPEIS = {
   admin: 'Administrador da empresa', engenheiro: 'Engenheiro responsável', supervisor: 'Supervisor de obra',
@@ -26,6 +29,8 @@ export async function carregarEmpresa() {
       conta.membros(ctx.orgId), admin ? conta.convites(ctx.orgId) : [], conta.usoDoPlano(ctx.orgId), conta.minhasEmpresas(),
     ]);
     Object.assign(dados, { membros, convites, uso: plano.uso, planos: plano.planos, empresas });
+    dados.logo = (await conta.logoDaEmpresa(ctx.orgId).catch(() => '')) || '';
+    dados.logoUrl = dados.logo ? await urlTemporaria(dados.logo, 3600).catch(() => '') : '';
     if (['admin', 'engenheiro'].includes(ctx.papel)) {
       const eq = await Promise.all(store.obras().map(async (o) => [o.id, await conta.equipeDaObra(o.id)]));
       dados.equipes = Object.fromEntries(eq);
@@ -94,6 +99,28 @@ export function viewEmpresa() {
       <p class="muted small" style="margin:0">Administrador e engenheiro veem todas as obras. Supervisor, financeiro, compras e cliente veem só as obras em que forem incluídos (abaixo). As permissões são conferidas pelo banco, não apenas pela tela.</p>
     </div>
 
+    ${dados.membros.length ? `<div class="card card-pad stack">
+      <h2>Liberações por pessoa</h2>
+      <p class="muted small" style="margin:0">O que cada pessoa pode fazer em Suprimentos e no cadastro de fornecedores. Sem alteração, vale o padrão do perfil. O administrador tem todas; o cliente, nenhuma. Quem decide é o banco: a pessoa sem a liberação não consegue gravar, mesmo tentando por fora da tela.</p>
+      <div class="table-wrap"><table class="data"><thead><tr><th>Pessoa</th>${LIBERACOES.map((l) => `<th class="small" title="${esc(l.texto)}">${esc(l.rotulo)}</th>`).join('')}<th></th></tr></thead><tbody>
+      ${dados.membros.map((m) => {
+        const efetivas = liberacoesDe(m.role, m.permissions);
+        const fixo = !admin || ['admin', 'cliente'].includes(m.role);
+        return `<tr><td>${esc(m.nome || m.email)}<div class="muted small">${esc(PAPEIS[m.role] || m.role)}</div></td>
+          ${LIBERACOES.map((l) => `<td><input type="checkbox" aria-label="${esc(l.rotulo)} — ${esc(m.nome || m.email)}" data-chg="nuvemLiberacao" data-id="${m.user_id}" data-lib="${l.id}" ${efetivas.includes(l.id) ? 'checked' : ''} ${fixo ? 'disabled' : ''}></td>`).join('')}
+          <td class="small">${m.permissions ? `<span class="badge info">personalizado</span>${admin ? ` <button class="btn sm" data-act="nuvemLiberacaoPadrao" data-id="${m.user_id}">Voltar ao padrão</button>` : ''}` : '<span class="muted">padrão do perfil</span>'}</td></tr>`;
+      }).join('')}
+      </tbody></table></div>
+      <p class="muted small" style="margin:0">Trocar o perfil de uma pessoa volta as liberações dela ao padrão do novo perfil. A pessoa vê a mudança na próxima sincronização (até 2 minutos) ou ao recarregar.</p>
+    </div>` : ''}
+
+    <div class="card card-pad stack">
+      <h2>Logo da empresa</h2>
+      <p class="muted small" style="margin:0">Aparece no cabeçalho do RDO e no PDF. PNG, JPG ou WEBP até 2 MB.</p>
+      ${dados.logoUrl ? `<img class="logo-previa" src="${esc(dados.logoUrl)}" alt="Logo da empresa">` : `<div class="muted small">${dados.logo ? 'Carregando…' : 'Nenhum logo enviado.'}</div>`}
+      ${admin ? `<div class="row"><label class="btn">${dados.logo ? 'Trocar logo' : 'Enviar logo'}<input type="file" accept="image/png,image/jpeg,image/webp" data-chg="nuvemLogo" hidden></label>${dados.logo ? '<button class="btn" data-act="nuvemLogoRemover">Remover</button>' : ''}</div>` : '<div class="muted small">Só o administrador altera o logo.</div>'}
+    </div>
+
     <div class="card card-pad stack">
       <h2>Exportar dados</h2>
       <p class="muted" style="margin:0">Cópia das obras que você pode ver e da biblioteca da empresa, em um arquivo JSON (portabilidade e backup pessoal). O backup oficial é o do banco (veja supabase/README.md).</p>
@@ -146,6 +173,16 @@ export const acoesEmpresa = {
     const link = conta.linkConvite(d.token);
     try { await navigator.clipboard.writeText(link); toast('Link copiado.'); } catch { info('Link do convite', `<code class="k" style="word-break:break-all;user-select:all">${esc(link)}</code>`); }
   },
+  async nuvemLogoRemover() {
+    if (!(await ask('Remover o logo dos relatórios? (O arquivo continua guardado.)', 'Remover'))) return;
+    await conta.definirLogo(nuvem.contexto().orgId, '');
+    carregarDiarioNuvem(true).catch(() => {});
+    toast('Logo removido.'); dados.carregado = false; queueRender();
+  },
+  async nuvemLiberacaoPadrao(d) {
+    await conta.definirLiberacoes(nuvem.contexto().orgId, d.id, null);
+    toast('Liberações de volta ao padrão do perfil.'); dados.carregado = false; queueRender();
+  },
   async nuvemRevogar(d) { await conta.revogarConvite(d.id); dados.carregado = false; queueRender(); },
   async nuvemRemoverMembro(d) {
     const m = dados.membros.find((x) => x.user_id === d.id);
@@ -158,6 +195,30 @@ export const mudancasEmpresa = {
   async nuvemPapel(d, el) {
     await conta.mudarPapel(nuvem.contexto().orgId, d.id, el.value).catch((e) => { dados.carregado = false; queueRender(); throw e; });
     toast('Perfil alterado.'); dados.carregado = false; queueRender();
+  },
+  async nuvemLogo(d, el) {
+    const f = el.files[0];
+    if (!f) return;
+    try {
+      validarArquivo(f, 2 * 1024 * 1024, TIPOS_IMAGEM);
+      const org = nuvem.contexto().orgId;
+      const caminho = await enviarArquivo(org, 'empresa', 'logo', f, 2 * 1024 * 1024, TIPOS_IMAGEM);
+      await conta.definirLogo(org, caminho);
+      carregarDiarioNuvem(true).catch(() => {});   // o RDO passa a mostrar o logo novo
+      toast('Logo atualizado.'); dados.carregado = false; queueRender();
+    } catch (e) { el.value = ''; throw e; }
+  },
+  async nuvemLiberacao(d, el) {
+    const m = dados.membros.find((x) => x.user_id === d.id);
+    const atual = new Set(liberacoesDe(m.role, m.permissions));
+    if (el.checked) atual.add(d.lib); else atual.delete(d.lib);
+    const ids = LIBERACOES.map((l) => l.id).filter((k) => atual.has(k));
+    const padrao = LIBERACOES.map((l) => l.id).filter((k) => (LIBERACOES_PADRAO[m.role] || []).includes(k));
+    const nova = ids.join() === padrao.join() ? null : ids;   // igual ao padrão: volta a acompanhar o perfil
+    try { await conta.definirLiberacoes(nuvem.contexto().orgId, d.id, nova); }
+    catch (e) { el.checked = !el.checked; throw e; }
+    m.permissions = nova;
+    toast('Liberação alterada.'); queueRender();
   },
   async nuvemAcessoObra(d, el) {
     try {

@@ -58,6 +58,10 @@ export async function criarEmpresa(nome, plano = 'profissional') {
 export async function aceitarConvite(token) {
   return verifica(await (await sb()).rpc('accept_invitation', { p_token: token.trim() }), 'convite');
 }
+/** Liberações efetivas do usuário logado nesta empresa (calculadas pelo banco). */
+export async function minhasLiberacoes(orgId) {
+  return verifica(await (await sb()).rpc('minhas_liberacoes', { p_org: orgId }), 'liberações') || [];
+}
 export async function perfil(userId) {
   const c = await sb();
   return verifica(await c.from('user_profiles').select('*').eq('id', userId).maybeSingle(), 'perfil');
@@ -65,6 +69,15 @@ export async function perfil(userId) {
 export async function lembrarEmpresa(userId, orgId) {
   const c = await sb();
   await c.from('user_profiles').update({ last_org_id: orgId }).eq('id', userId);
+}
+export async function logoDaEmpresa(orgId) {
+  const c = await sb();
+  return verifica(await c.from('organizations').select('logo_path').eq('id', orgId).maybeSingle(), 'empresa')?.logo_path || '';
+}
+/** Só o administrador consegue (banco: política organizations_update e caminho dentro da pasta da empresa). */
+export async function definirLogo(orgId, caminho) {
+  const c = await sb();
+  verifica(await c.from('organizations').update({ logo_path: caminho }).eq('id', orgId), 'logo');
 }
 export async function renomearEmpresa(orgId, nome) {
   const c = await sb();
@@ -74,7 +87,7 @@ export async function renomearEmpresa(orgId, nome) {
 /* ---------- membros e convites (só o admin vê convites; o banco garante) ---------- */
 export async function membros(orgId) {
   const c = await sb();
-  const ms = verifica(await c.from('organization_members').select('user_id, role, created_at').eq('org_id', orgId), 'membros') || [];
+  const ms = verifica(await c.from('organization_members').select('user_id, role, permissions, created_at').eq('org_id', orgId), 'membros') || [];
   const ps = ms.length ? verifica(await c.from('user_profiles').select('id, email, full_name').in('id', ms.map((m) => m.user_id)), 'perfis') : [];
   const porId = new Map(ps.map((p) => [p.id, p]));
   return ms.map((m) => ({ ...m, email: porId.get(m.user_id)?.email || '', nome: porId.get(m.user_id)?.full_name || '' }));
@@ -96,7 +109,13 @@ export async function revogarConvite(id) {
 }
 export async function mudarPapel(orgId, userId, papel) {
   const c = await sb();
-  verifica(await c.from('organization_members').update({ role: papel }).eq('org_id', orgId).eq('user_id', userId), 'papel');
+  // trocar o perfil volta as liberações ao padrão do novo perfil
+  verifica(await c.from('organization_members').update({ role: papel, permissions: null }).eq('org_id', orgId).eq('user_id', userId), 'papel');
+}
+/** Define as liberações de uma pessoa (null = padrão do perfil). Só o administrador consegue (banco). */
+export async function definirLiberacoes(orgId, userId, permissoes) {
+  const c = await sb();
+  verifica(await c.from('organization_members').update({ permissions: permissoes }).eq('org_id', orgId).eq('user_id', userId), 'liberações');
 }
 export async function removerMembro(orgId, userId) {
   const c = await sb();

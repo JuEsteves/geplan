@@ -3,7 +3,7 @@
 import * as store from '../store.js';
 import { enviarObra, enviarBiblioteca, baixarEmpresa, arquivarObra, diferencas, podeGravar, TABELAS_BIBLIOTECA } from './sincronizar.js';
 import { obraParaLinhas, bibliotecaParaLinhas, TABELAS_OBRA, converterIds } from './mapa.js';
-import { banco } from './conta.js';
+import { banco, minhasLiberacoes } from './conta.js';
 
 const CHAVE = 'planobras:nuvem:v1';
 const CHAVE_ANTES = 'planobras:antes-da-nuvem';   // cópia dos dados do aparelho/Drive antes de entrar na nuvem
@@ -34,7 +34,7 @@ export const ativo = () => !!ctx;
 /** Há alterações locais (que este papel pode gravar) ainda não confirmadas pelo banco? */
 export function pendente() {
   if (!ctx) return false;
-  const filtra = (d) => Object.keys(d).some((t) => podeGravar(ctx.papel, t));
+  const filtra = (d) => Object.keys(d).some((t) => podeGravar(ctx.papel, t, ctx.liberacoes));
   if (filtra(diferencas(bibliotecaParaLinhas(store.lib(), ctx.orgId), snaps.biblioteca, TABELAS_BIBLIOTECA))) return true;
   const ids = new Set(store.obras().map((o) => o.id));
   if (Object.keys(snaps).some((k) => k !== 'biblioteca' && !ids.has(k)) && ctx.papel === 'admin') return true;
@@ -71,12 +71,22 @@ export function encerrar() {
   setStatus('local');
 }
 
-/** Baixa tudo da empresa e substitui a cópia de trabalho do aparelho. */
-export async function baixar() {
-  if (!ctx) return;
+/** Baixa tudo da empresa e substitui a cópia de trabalho do aparelho. Chamadas simultâneas aguardam a mesma. */
+let baixando = null;
+export function baixar() {
+  if (!ctx) return Promise.resolve();
+  if (!baixando) baixando = baixarAgora().finally(() => { baixando = null; });
+  return baixando;
+}
+async function baixarAgora() {
   setStatus('busy', 'Carregando dados da empresa…');
+  const c0 = ctx;
   try {
-    const r = await baixarEmpresa(await banco(), ctx.orgId, ctx.papel);
+    const r = await baixarEmpresa(await banco(), c0.orgId, c0.papel);
+    // liberações podem ter mudado (o administrador altera na tela Empresa)
+    const libs = await minhasLiberacoes(c0.orgId).catch(() => c0.liberacoes);
+    if (ctx !== c0) return;   // saiu ou trocou de empresa durante o download: descarta
+    ctx.liberacoes = libs;
     store.carregarDaNuvem(r.lib, r.obras);
     snaps = r.snaps;
     gravar();
@@ -109,7 +119,7 @@ export async function enviar() {
       snaps.biblioteca = rb.snap; gravar();
       for (const o of store.obras()) {
         try {
-          const r = await enviarObra(b, o, ctx.orgId, ctx.papel, snaps[o.id]);
+          const r = await enviarObra(b, o, ctx.orgId, ctx.papel, snaps[o.id], ctx.liberacoes);
           snaps[o.id] = r.snap; gravar();
           r.ignorados.forEach((t) => avisos.add(t));
           recusadas += r.recusadas;

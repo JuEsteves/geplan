@@ -73,6 +73,18 @@ h3 { font-size: 14px; font-weight: 700; margin: 0; }
 .num { font-variant-numeric: tabular-nums; text-align: right; }
 .hidden { display: none !important; }
 
+/* Caminho da obra: EAP → Orçamento → Vínculos → Cronograma → Execução → Custos */
+.caminho-obra { display: flex; gap: 6px; list-style: none; margin: 0 0 12px; padding: 0; overflow-x: auto; scrollbar-width: thin; }
+.caminho-obra li { flex: 1 0 auto; min-width: 118px; }
+.caminho-obra a { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; text-decoration: none; color: inherit; background: var(--surface); }
+.caminho-obra a:hover { border-color: var(--accent); }
+.caminho-obra .n { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; font-size: 12px; font-weight: 700; background: var(--surface-2); color: var(--muted); flex: none; }
+.caminho-obra small { display: block; font-size: 11px; color: var(--muted); font-weight: 400; }
+.caminho-obra b { font-size: 13px; }
+.caminho-obra li.feito .n { background: color-mix(in srgb, var(--good) 22%, transparent); color: var(--good); }
+.caminho-obra li.proximo a { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.caminho-obra li.proximo .n { background: var(--accent); color: var(--accent-ink, #fff); }
+
 /* Ambiente de testes (js/config.js): faixa fixa, não cobre botões */
 .faixa-teste { position: fixed; left: 50%; bottom: 10px; transform: translateX(-50%); z-index: 1000; pointer-events: none;
   background: #b45309; color: #fff; font-size: 12px; font-weight: 700; letter-spacing: .04em; padding: 5px 14px; border-radius: 999px;
@@ -362,6 +374,9 @@ table.custos-fase tfoot th { border-top: 2px solid var(--line, currentColor); }
 .obra-card .meta b { display: block; color: var(--text); font-size: 14px; font-weight: 600; }
 .progress { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; margin-top: 12px; }
 .progress > div { height: 100%; background: var(--accent); border-radius: 3px; }
+.progress > .indeterminado { width: 35% !important; animation: indeterminado 1.4s ease-in-out infinite; }
+@keyframes indeterminado { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }
+@media (prefers-reduced-motion: reduce) { .progress > .indeterminado { animation: none; width: 100% !important; opacity: .6; } }
 
 /* Tables */
 .table-wrap { overflow-x: auto; border-radius: var(--radius); }

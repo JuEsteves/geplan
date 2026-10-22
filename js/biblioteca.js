@@ -5,7 +5,8 @@ import { calcular, validarComposicao, liderDe } from './calculo.js';
 import { cronograma } from './cpm.js';
 import { avanco } from './curvaS.js';
 import { novaComposicao, FONTES, uid, novaObra } from './model.js';
-import { lerArquivo, interpretar, aplicarComposicoes, modeloDaPlanilha, etapasDoModelo, selecaoPadrao, instanciarModelo } from './importador.js';
+import { lerArquivo, interpretar, aplicarComposicoes, modeloDaPlanilha, etapasDoModelo, selecaoPadrao, instanciarModelo, modelosDisponiveis, modeloInicial } from './importador.js';
+import { leituraDisponivel, lerProjeto } from './leituraProjeto.js';
 import { fmtBR, fmtNum, fmtBRL, todayISO, todayDay } from './schedule.js';
 import { esc, I, ui, toast, formDialog, ask, info, commit, queueRender, parseNum, fmtIn } from './ui.js';
 
@@ -110,21 +111,22 @@ export function viewObras() {
       <div class="progress" title="Avanço físico executado: ${fmtNum(av.fisicoReal, 1)}%"><div style="width:${Math.min(100, av.fisicoReal)}%"></div></div>
     </a>`;
   }).join('');
-  const modelos = lib.modelosEAP || [];
-  return `<div class="page-head"><div><h1>Obras</h1><div class="muted">Orçamento, EAP, cronograma e Curva S de cada obra</div></div>
-    <div class="row">${pode('cadastro') ? `<a class="btn" href="#/importar">${I.upload} Importar planilha</a><button class="btn primary" data-act="newObra">${I.plus} Nova obra</button>` : ''}</div></div>
+  const modelos = modelosDisponiveis(lib);
+  const inicial = modeloInicial(lib);
+  return `<div class="page-head"><div><h1>Obras</h1><div class="muted">Comece pela EAP: envie o projeto (PDF) ou parta do modelo de etapas — tudo editável depois</div></div>
+    <div class="row">${pode('cadastro') ? `<a class="btn" href="#/importar" title="Para quem já tem a EAP numa planilha no formato do modelo">${I.upload} Importar planilha</a><button class="btn primary" data-act="newObra">${I.plus} Nova obra</button>` : ''}</div></div>
     ${list.length ? `<div class="obras-grid">${cards}</div>` : `<div class="card empty"><p>Nenhuma obra ainda.</p>
-      <p class="small">${!pode('cadastro') ? 'Nenhuma obra liberada para o seu perfil. Peça ao administrador da empresa para incluir você na equipe da obra.' : modelos.length ? 'Crie uma obra a partir do modelo inicial e escolha as fases.' : 'Comece importando a planilha modelo — ela vira o modelo inicial para as próximas obras.'}</p>
-      <div class="row" style="justify-content:center">${pode('cadastro') ? `<a class="btn" href="#/importar">${I.upload} Importar planilha</a><button class="btn primary" data-act="newObra">${I.plus} Nova obra</button>` : ''}</div></div>`}
-    <div class="card" style="margin-top:18px"><div class="card-pad" style="padding-bottom:6px"><h2>Modelos de EAP</h2><div class="muted small">Ao criar uma obra, você escolhe um modelo e as fases que entram. O modelo inicial (★) vem selecionado.</div></div>
-      ${modelos.length ? modelos.map((m) => {
+      <p class="small">${!pode('cadastro') ? 'Nenhuma obra liberada para o seu perfil. Peça ao administrador da empresa para incluir você na equipe da obra.' : 'Crie a obra e monte a EAP: envie o projeto em PDF para a IA sugerir as etapas, ou escolha as etapas do modelo. Não precisa de planilha.'}</p>
+      <div class="row" style="justify-content:center">${pode('cadastro') ? `<button class="btn primary" data-act="newObra">${I.plus} Nova obra</button>` : ''}</div></div>`}
+    <div class="card" style="margin-top:18px"><div class="card-pad" style="padding-bottom:6px"><h2>Modelos de EAP</h2><div class="muted small">Ao criar uma obra, você escolhe um modelo e as etapas que entram. O modelo inicial (★) vem selecionado. O modelo do GEPLAN é fixo; para adaptar, duplique na aba Fases.</div></div>
+      ${modelos.map((m) => {
         const et = etapasDoModelo(m);
-        const padrao = lib.modeloPadraoId === m.id;
-        return `<div class="list-item"><span style="flex:1"><b>${padrao ? '★ ' : ''}${esc(m.nome)}</b> <span class="muted small">· ${et.filter((e) => !e.variante).length} etapas · ${et.reduce((s, e) => s + e.nAtiv, 0)} atividades${m.orcamento?.length ? ` · ${m.orcamento.length} itens de orçamento` : ''} · ${m.criadoEm || ''}</span></span>
-          ${padrao ? '<span class="badge info">modelo inicial</span>' : `<button class="btn sm" data-act="modeloPadrao" data-id="${m.id}">Tornar inicial</button>`}
-          <a class="btn sm" href="#/fases/${m.id}">Editar fases</a>
-          <button class="icon-btn danger" data-act="delModelo" data-id="${m.id}" title="Excluir modelo">${I.trash}</button></div>`;
-      }).join('') : `<div class="list-item muted small">Nenhum modelo. Importe a planilha, crie um na aba <a href="#/fases">Fases</a> ou, numa obra, use Cadastro › Salvar EAP como modelo.</div>`}</div>`;
+        const padrao = inicial === m;
+        return `<div class="list-item"><span style="flex:1"><b>${padrao ? '★ ' : ''}${esc(m.nome)}</b> <span class="muted small">· ${et.filter((e) => !e.variante).length} etapas · ${et.reduce((s, e) => s + e.subetapas.length, 0)} subetapas · ${et.reduce((s, e) => s + e.nAtiv, 0)} atividades${m.orcamento?.length ? ` · ${m.orcamento.length} itens de orçamento` : ''}${m.criadoEm ? ` · ${m.criadoEm}` : ''}</span></span>
+          ${m.base ? '<span class="badge">GEPLAN</span>' : ''}${padrao ? '<span class="badge info">modelo inicial</span>' : m.base ? '' : `<button class="btn sm" data-act="modeloPadrao" data-id="${m.id}">Tornar inicial</button>`}
+          <a class="btn sm" href="#/fases/${m.id}">${m.base ? 'Ver etapas' : 'Editar fases'}</a>
+          ${m.base ? '' : `<button class="icon-btn danger" data-act="delModelo" data-id="${m.id}" title="Excluir modelo">${I.trash}</button>`}</div>`;
+      }).join('')}</div>`;
 }
 
 /* ---------- Composições ---------- */
@@ -229,7 +231,7 @@ async function criarObraDoModelo(m, nome, inicio) {
   if (m.premissas?.eficiencia > 0) o.eficiencia = m.premissas.eficiencia;
   const res = instanciarModelo(o, m, r.sel, { orcamento: r.orcamento, quantidades: r.quantidades }, lib);
   store.addObra(o);
-  location.hash = `#/obra/${o.id}/painel`;
+  location.hash = `#/obra/${o.id}/atividades`;
   if (res.avisos.length) setTimeout(() => info('Obra criada', `<p style="margin-top:0">${o.eap.length} itens na EAP, ${o.dependencias.length} predecessoras, ${o.orcamento.length} itens de orçamento.</p><details><summary>${res.avisos.length} aviso(s)</summary><ul class="small">${res.avisos.slice(0, 40).map((a) => `<li>${esc(a)}</li>`).join('')}</ul></details>`), 80);
   return o;
 }
@@ -257,25 +259,29 @@ export const acoesBiblioteca = {
   async newObra() {
     const lib = store.lib();
     const obras = store.obras();
-    const modelos = lib.modelosEAP || [];
-    const pad = modelos.find((m) => m.id === lib.modeloPadraoId);
+    const modelos = modelosDisponiveis(lib);
+    const pad = modeloInicial(lib);
+    const ia = leituraDisponivel();
     const opcoes = [
-      ...(pad ? [{ value: `m:${pad.id}`, label: `★ Modelo inicial: ${pad.nome} (escolher fases)` }] : []),
-      ...modelos.filter((m) => m !== pad).map((m) => ({ value: `m:${m.id}`, label: `Modelo: ${m.nome} (escolher fases)` })),
-      { value: '', label: 'EAP vazia' },
+      { value: 'pdf', label: `Ler o projeto (PDF) — a IA sugere as etapas da EAP${ia.ok ? '' : ' (indisponível)'}` },
+      { value: `m:${pad.id}`, label: `★ ${pad.nome} — escolher as etapas` },
+      ...modelos.filter((m) => m !== pad).map((m) => ({ value: `m:${m.id}`, label: `${m.nome} — escolher as etapas` })),
+      { value: '', label: 'EAP em branco (montar do zero)' },
       ...obras.map((o) => ({ value: `o:${o.id}`, label: `Cópia da obra: ${o.nome}` })),
     ];
     const v = await formDialog({ title: 'Nova obra', ok: 'Continuar', fields: [
       { name: 'nome', label: 'Nome da obra', required: true, placeholder: 'ex.: Residência Silva' },
       { name: 'inicio', label: 'Data de início', type: 'date', required: true, value: todayISO() },
-      { name: 'base', label: 'Começar com', type: 'select', value: opcoes[0].value, options: opcoes },
+      { name: 'base', label: 'Como montar a EAP', type: 'select', value: ia.ok ? 'pdf' : `m:${pad.id}`, options: opcoes },
     ] });
     if (!v) return;
+    if (v.base === 'pdf' && !ia.ok) { toast(ia.motivo, 6000); return; }
     if (v.base.startsWith('m:')) return criarObraDoModelo(modelos.find((m) => m.id === v.base.slice(2)), v.nome.trim(), v.inicio);
     let o;
     if (v.base.startsWith('o:')) { o = store.duplicateObra(store.obra(v.base.slice(2)), v.nome.trim()); o.inicio = v.inicio; store.touch(o); }
     else o = store.addObra(novaObra({ nome: v.nome.trim(), inicio: v.inicio }));
-    location.hash = `#/obra/${o.id}/painel`;
+    location.hash = `#/obra/${o.id}/atividades`;
+    if (v.base === 'pdf') setTimeout(() => lerProjeto(o), 80);
   },
   modeloPadrao(d) { const lib = store.lib(); lib.modeloPadraoId = d.id; commit(lib); toast('Modelo inicial definido.'); },
   async modeloRenomear(d) {

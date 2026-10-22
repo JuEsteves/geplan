@@ -118,6 +118,36 @@ export function filhosDe(obra) {
   return map;
 }
 
+/** Ids de um nó e de todos os seus descendentes. */
+export function subarvore(obra, id) {
+  const ids = new Set([id]);
+  let mudou = true;
+  while (mudou) { mudou = false; for (const x of obra.eap) if (x.parentId && ids.has(x.parentId) && !ids.has(x.id)) { ids.add(x.id); mudou = true; } }
+  return ids;
+}
+
+/**
+ * Move um item da EAP (com os descendentes) para dentro de outro (ou para o nível 1 com `novoPaiId` nulo), como último
+ * filho. Vínculos, predecessoras e medições ficam como estão (são ligados por id). Atualiza etapa/subetapa e renumera.
+ */
+export function moverNo(obra, id, novoPaiId) {
+  const a = obra.eap.find((x) => x.id === id);
+  if (!a) throw new Error('Item não encontrado.');
+  if (novoPaiId && subarvore(obra, id).has(novoPaiId)) throw new Error('Não dá para mover um item para dentro dele mesmo.');
+  a.parentId = novoPaiId || null;
+  obra.eap.splice(obra.eap.indexOf(a), 1);
+  obra.eap.push(a);
+  renumerar(obra);
+  const porId = new Map(obra.eap.map((x) => [x.id, x]));
+  for (const x of obra.eap) {
+    const cadeia = [];
+    for (let y = x; y; y = y.parentId ? porId.get(y.parentId) : null) cadeia.unshift(y);
+    x.etapa = cadeia[0].descricao;
+    x.subetapa = cadeia.length >= 2 ? cadeia[1].descricao : '';
+  }
+  return a;
+}
+
 /** Reordena obra.eap em ordem de árvore (pré-ordem) e renumera os códigos (1, 1.1, 1.1.1…). */
 export function renumerar(obra) {
   const filhos = filhosDe(obra);

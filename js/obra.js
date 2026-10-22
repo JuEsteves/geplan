@@ -6,12 +6,13 @@ import { calcular, fmtPct, liderDe } from './calculo.js';
 import { cronograma, criaCiclo } from './cpm.js';
 import { curvaS, avanco, fracPlanejada, curvaReal, incorridoAte } from './curvaS.js';
 import { formatNotacao, resolverNotacao } from './predecessoras.js';
-import { filhosDe, renumerar, novaAtividade, novoItem, novaComposicao, TIPOS, DURACAO_PADRAO, uid, registrar, STATUS_OBRA, PERFIS_DISTRIBUICAO, PESOS_FISICOS } from './model.js';
+import { filhosDe, renumerar, subarvore, moverNo, novaAtividade, novoItem, novaComposicao, TIPOS, DURACAO_PADRAO, uid, registrar, STATUS_OBRA, PERFIS_DISTRIBUICAO, PESOS_FISICOS } from './model.js';
 import { toDay, fmtBR, isoBR, todayDay, todayISO, fmtNum, fmtNumFix, fmtBRL, dateParts, MESES, weekday, feriadosNacionais } from './schedule.js';
 import { esc, I, ui, toast, formDialog, ask, info, commit, queueRender, parseNum, fmtIn } from './ui.js';
 import { exportExcel, exportPDF } from './export.js';
-import { modeloDaObra, instanciarModelo } from './importador.js';
+import { modeloDaObra, instanciarModelo, modelosDisponiveis, modeloInicial } from './importador.js';
 import { escolherFases } from './biblioteca.js';
+import { leituraDisponivel, lerProjeto } from './leituraProjeto.js';
 import { tabPainel, tabMedicoes, tabDiario, tabFinanceiro, usuario } from './gestao.js';
 import { bdiTCU, resumoOrcamento, snapshotOrcamento, compararOrcamento, valorAgregado } from './financeiro.js';
 import { importarOrcamentoExcel } from './orcImport.js';
@@ -82,6 +83,27 @@ function linhasVisiveis(c, { busca = '', soAlertas = false } = {}) {
   return out;
 }
 
+/** Caminho da obra (tudo interligado pela obra): EAP → Orçamento → Vínculos → Cronograma → Execução → Custos. */
+export function etapasDaObra(o, c) {
+  const itens = o.orcamento.length;
+  const okVinc = itens && [...c.calc.itens.values()].every((x) => x.status === 'OK');
+  const exec = (o.medicoesAtiv || []).length + (o.diario || []).length;
+  return [
+    { k: 'atividades', nome: 'EAP', feito: o.eap.length > 0, info: o.eap.length ? `${o.eap.filter((a) => !a.parentId).length} etapas` : 'montar' },
+    { k: 'orcamento', nome: 'Orçamento', feito: itens > 0, info: itens ? `${itens} itens` : 'a fazer' },
+    { k: 'vinculos', nome: 'Vínculos', feito: !!okVinc, info: !itens ? '—' : okVinc ? 'completos' : 'pendentes' },
+    { k: 'gantt', nome: 'Cronograma', feito: !!o.linhaBase, info: o.linhaBase ? 'linha de base' : o.eap.length ? 'sem linha de base' : '—' },
+    { k: 'medicoes', nome: 'Execução', feito: exec > 0, info: exec ? `${exec} registro(s)` : 'medições e diário' },
+    { k: 'financeiro', nome: 'Custos', feito: (o.despesas || []).length + (o.compromissos || []).length > 0, info: 'previsto × realizado' },
+  ];
+}
+function caminhoDaObra(o, c) {
+  const passos = etapasDaObra(o, c);
+  const proximo = passos.find((p) => !p.feito);
+  return `<ol class="caminho-obra" aria-label="Caminho da obra">${passos.map((p, i) => `<li class="${p.feito ? 'feito' : p === proximo ? 'proximo' : ''}"><a href="#/obra/${o.id}/${p.k}">
+    <span class="n">${p.feito ? '✓' : i + 1}</span><span><b>${p.nome}</b><small>${esc(p.info)}</small></span></a></li>`).join('')}</ol>`;
+}
+
 /* ---------- cabeçalho da obra ---------- */
 export function viewObra(route) {
   const o = store.obra(route.id);
@@ -103,6 +125,7 @@ export function viewObra(route) {
         <span><b class="ink">${fmtBRL(c.calc.totalOrcamento)}</b></span>
         ${alertas ? `· <a href="#/obra/${o.id}/atividades" data-act="verAlertas" class="badge warn" style="text-decoration:none">${I.alert} ${alertas} alerta${alertas > 1 ? 's' : ''}</a>` : ''}
       </div></div></div>
+    ${caminhoDaObra(o, c)}
     <nav class="tabs">${TABS.map(([k, l]) => `<a href="#/obra/${o.id}/${k}" class="${tab === k ? 'active' : ''}">${l}</a>`).join('')}</nav>
     ${avisoDoPerfil()}
     ${c.cron.ciclo ? `<div class="alert err" style="margin-bottom:14px"><b>Dependência circular</b> entre ${c.cron.cicloIds.map((id) => c.codigoDe(id)).slice(0, 12).join(', ')}. Revise as predecessoras.</div>` : ''}
@@ -313,6 +336,7 @@ function tabAtividades(c) {
     </div>
     <div class="row">
       <button class="btn sm primary" data-act="atvFasesModelo">${I.plus} Fases do modelo</button>
+      <button class="btn sm" data-act="atvLerProjeto" title="A IA lê o projeto em PDF e sugere etapas e subetapas para você revisar">${I.upload} Ler projeto (PDF)</button>
       <button class="btn sm" data-act="atvNovaEtapa">${I.plus} Etapa</button>
       <button class="btn sm" data-act="exportXlsx">Exportar Excel</button>
       <button class="btn sm" data-act="exportPdf">Exportar PDF</button>
@@ -323,7 +347,8 @@ function tabAtividades(c) {
     ${o.eap.length ? `<div class="card table-wrap tree-wrap"><table class="data tree">
       <thead><tr><th>Código</th><th>Atividade</th><th>Tipo</th><th>Função líder</th><th class="num">HH</th><th>Equipe</th><th class="num" title="Duração calculada">Calc.</th><th title="Duração manual">Manual</th><th class="num" title="Duração adotada (dias úteis)">Dur.</th><th>Início</th><th>Término</th><th>Predecessoras</th><th class="num">Folga</th><th class="num">Custo</th>${temLB ? '<th class="num" title="Desvio do término em relação à linha de base (dias úteis)">LB</th>' : ''}<th></th><th></th></tr></thead>
       <tbody>${rows || `<tr><td colspan="17" class="muted">Nenhuma atividade com esse filtro.</td></tr>`}</tbody></table></div>`
-      : `<div class="card empty"><p>A obra ainda não tem EAP.</p><div class="row" style="justify-content:center"><button class="btn primary" data-act="atvFasesModelo">${I.plus} Adicionar fases do modelo</button><button class="btn" data-act="atvNovaEtapa">${I.plus} Criar etapa do zero</button></div></div>`}
+      : `<div class="card empty"><p>A obra ainda não tem EAP. Comece por um destes caminhos — depois tudo é editável:</p>
+        <div class="row" style="justify-content:center"><button class="btn primary" data-act="atvLerProjeto">${I.upload} Ler o projeto (PDF) com IA</button><button class="btn" data-act="atvFasesModelo">${I.plus} Escolher etapas do modelo</button><button class="btn" data-act="atvNovaEtapa">${I.plus} Criar etapa do zero</button></div></div>`}
     <div class="muted small"><b>Duração</b> = ARRED.PARA.CIMA(HH ÷ (equipe × ${fmtNum(calc.jornada)} h × ${fmtNum(calc.eficiencia)})). A duração manual tem prioridade. Valores em <i class="prov">itálico</i> são provisórios (padrão do tipo).
     <b>Predecessoras:</b> <code class="k">3.2</code> término→início · <code class="k">3.2 TI-10</code> começa 10 dias úteis antes do fim · <code class="k">3.1 II+5</code> 5 dias após o início · <code class="k">6.1/6.2 TI-5</code> várias.</div>
   </div>`;
@@ -685,6 +710,20 @@ function proximoCodigoItem(o) {
 }
 
 /** Menu da atividade (detalhes + estrutura). */
+/** Etapas e subetapas (itens com filhos, ou etapas de nível 1) que podem receber o item `a`. */
+function destinosParaMover(o, c, a) {
+  const proibidos = subarvore(o, a.id);
+  const out = a.parentId ? [{ value: '', label: '— Nível 1 (vira uma etapa) —' }] : [];
+  for (const x of o.eap) {
+    if (proibidos.has(x.id) || x.id === a.parentId) continue;
+    const grupo = (c.filhos.get(x.id) || []).length > 0 || x.nivel === 1;
+    if (!grupo) continue;
+    out.push({ value: x.id, label: `${'· '.repeat(x.nivel - 1)}${x.codigo} — ${x.descricao}` });
+  }
+  return out;
+}
+const moverAtividade = (o, a, destino) => moverNo(o, a.id, destino);
+
 async function menuAtividade(o, a) {
   const c = contexto(o);
   const temF = (c.filhos.get(a.id) || []).length > 0;
@@ -706,6 +745,7 @@ async function menuAtividade(o, a) {
         <button type="button" class="btn sm" data-r="irmao">${I.plus} Atividade abaixo</button>
         <button type="button" class="btn sm" data-r="cima">${I.up} Subir</button>
         <button type="button" class="btn sm" data-r="baixo">${I.down} Descer</button>
+        <button type="button" class="btn sm" data-r="mover" title="Leva para outra etapa ou subetapa (com as subatividades, vínculos e predecessoras)">Mover para…</button>
         <button type="button" class="btn sm danger" data-r="excluir">${I.trash} Excluir</button>
       </div>
     </div>
@@ -731,6 +771,17 @@ async function menuAtividade(o, a) {
     }
   };
   salvarCampos();
+  if (r.acao === 'mover') {
+    const destinos = destinosParaMover(o, c, a);
+    if (!destinos.length) { toast('Não há outra etapa ou subetapa para onde mover.'); return commit(o); }
+    const v = await formDialog({ title: `Mover ${a.codigo} — ${a.descricao}`, ok: 'Mover', fields: [
+      { name: 'destino', label: 'Para dentro de', type: 'select', value: destinos[0].value, options: destinos },
+    ] });
+    if (!v) return commit(o);
+    moverAtividade(o, a, v.destino || null);
+    toast(`Movida para ${a.codigo}. Vínculos, predecessoras e medições foram mantidos.`, 4500);
+    return commit(o);
+  }
   const irmaos = o.eap.filter((x) => (x.parentId || null) === (a.parentId || null));
   if (r.acao === 'filho' || r.acao === 'irmao') {
     const v = await formDialog({ title: r.acao === 'filho' ? `Nova subatividade de ${a.codigo}` : `Nova atividade abaixo de ${a.codigo}`, ok: 'Criar', fields: [
@@ -971,14 +1022,19 @@ export const acoesObra = {
     if (v.padrao || !lib.modeloPadraoId) lib.modeloPadraoId = m.id;
     commit(lib); toast('Modelo salvo. Use-o ao criar uma nova obra.');
   },
+  atvLerProjeto() {
+    const ia = leituraDisponivel();
+    if (!ia.ok) return toast(ia.motivo, 6000);
+    lerProjeto(obraAtual());
+  },
   async atvFasesModelo() {
     const o = obraAtual(); const lib = store.lib();
-    const modelos = lib.modelosEAP || [];
-    if (!modelos.length) return toast('Nenhum modelo ainda. Importe a planilha (menu Importar) ou salve a EAP de uma obra como modelo.', 5000);
+    const modelos = modelosDisponiveis(lib);
+    const inicial = modeloInicial(lib);
     const usado = modelos.find((m) => o.eap.some((a) => a.modeloId === m.id));
-    let m = usado || modelos.find((x) => x.id === lib.modeloPadraoId) || modelos[0];
+    let m = usado || inicial;
     if (modelos.length > 1) {
-      const v = await formDialog({ title: 'Adicionar fases', ok: 'Continuar', fields: [{ name: 'm', label: 'Modelo', type: 'select', value: m.id, options: modelos.map((x) => ({ value: x.id, label: `${x.id === lib.modeloPadraoId ? '★ ' : ''}${x.nome}` })) }] });
+      const v = await formDialog({ title: 'Adicionar fases', ok: 'Continuar', fields: [{ name: 'm', label: 'Modelo', type: 'select', value: m.id, options: modelos.map((x) => ({ value: x.id, label: `${x === inicial ? '★ ' : ''}${x.nome}` })) }] });
       if (!v) return;
       m = modelos.find((x) => x.id === v.m);
     }

@@ -8,6 +8,7 @@
 import { LIBS, loadScript } from './libs.js';
 import { uid, novaObra, novaAtividade, novoItem, novaComposicao, normalizaTipo, normalizaFonte, renumerar, filhosDe } from './model.js';
 import { parseNotacao } from './predecessoras.js';
+import { MODELO_BASE_LINHAS, MODELO_BASE_NOME, MODELO_BASE_VERSAO } from './modeloBase.js';
 
 export async function lerArquivo(file) {
   await loadScript(LIBS.xlsx);
@@ -284,6 +285,39 @@ export function modeloDaPlanilha(dados, nome) {
     atividades: dados.atividades.map((r) => { const d = dados.duracoes.get(r.codigo); return { ...r, equipe: d?.equipe ?? null, duracaoManual: d?.manual ?? null }; }),
     orcamento: dados.orcamento, vinculos: dados.vinculos,
   });
+}
+
+/* ---------- modelo base do GEPLAN (embutido, só leitura) ----------
+   Disponível para todas as empresas sem importar nada. Ids fixos (gb-<código>) para que "adicionar fases do modelo"
+   continue reconhecendo o que já está na obra em qualquer aparelho. Para personalizar: Fases › Duplicar. */
+export const MODELO_BASE_UUID = 'b0a5e000-0000-4000-8000-000000000001';
+let _base = null;
+export function modeloBase() {
+  if (_base) return _base;
+  const atividades = MODELO_BASE_LINHAS.map(([codigo, etapa, descricao, pred, tipo]) => {
+    const nivel = codigo.split('.').length;
+    return { codigo, nivel, etapa, subetapa: nivel === 2 ? descricao : '', descricao, pred, tipo };
+  });
+  // nome da subetapa para as atividades (usado só se faltar a linha da subetapa)
+  const subs = new Map(atividades.filter((a) => a.nivel === 2).map((a) => [a.codigo, a.descricao]));
+  for (const a of atividades) if (a.nivel >= 3) a.subetapa = subs.get(a.codigo.split('.').slice(0, 2).join('.')) || '';
+  const M = converterModelo({ id: MODELO_BASE_UUID, nome: MODELO_BASE_NOME, versao: 2, premissas: {}, atividades, orcamento: [], vinculos: [] });
+  const novoId = new Map(M.eap.map((a) => [a.id, `gb-${a.codigo}`]));
+  for (const a of M.eap) { a.id = novoId.get(a.id); a.parentId = a.parentId ? novoId.get(a.parentId) : null; if (a.varianteDe) a.varianteDe = novoId.get(a.varianteDe) || null; }
+  M.dependencias.forEach((d, i) => { d.id = `gb-d${i}`; d.atividadeId = novoId.get(d.atividadeId); d.predecessoraId = novoId.get(d.predecessoraId); });
+  Object.assign(M, { base: true, baseVersao: MODELO_BASE_VERSAO, criadoEm: '' });
+  _base = M;
+  return M;
+}
+
+/** Modelos para criar obras / adicionar fases: os da empresa e, sempre, o modelo base do GEPLAN. */
+export function modelosDisponiveis(lib) {
+  return [...(lib.modelosEAP || []), modeloBase()];
+}
+/** Modelo inicial: o marcado pela empresa ou, sem nenhum, o modelo base. */
+export function modeloInicial(lib) {
+  const ms = lib.modelosEAP || [];
+  return ms.find((m) => m.id === lib.modeloPadraoId) || ms[0] || modeloBase();
 }
 
 /** Modelo vazio, para montar as fases do zero na aba Fases. */

@@ -5,12 +5,12 @@ import { isoBR, toDay, weekday } from './schedule.js';
 import { pode } from './permissoes.js';
 import { configurado as nuvemConfigurada } from './nuvem/supabase.js';
 import { secaoCategorias } from './fornecedores.js';
+import { modeloInicial } from './importador.js';
 
 export function viewConfiguracoes() {
   const lib = store.lib();
   const editar = pode('biblioteca');
-  const modelos = lib.modelosEAP || [];
-  const padrao = modelos.find((m) => m.id === lib.modeloPadraoId);
+  const padrao = modeloInicial(lib);
   const feriados = [...(lib.feriadosGlobais || [])].sort((a, b) => a.data.localeCompare(b.data));
   const nuvem = nuvemConfigurada();
   return `<div class="page-head"><div><h1>Configurações</h1><div class="muted">Ajustes que valem para todas as obras${nuvem ? ' da empresa' : ''}.</div></div></div>
@@ -23,8 +23,8 @@ export function viewConfiguracoes() {
     </div>
     <div class="card card-pad stack">
       <h2>Modelo inicial de fases (EAP)</h2>
-      <p style="margin:0">${padrao ? `Novas obras começam pelo modelo <b>${esc(padrao.nome)}</b>.` : modelos.length ? 'Nenhum modelo marcado como inicial.' : 'Nenhum modelo cadastrado ainda: importe a planilha modelo.'}</p>
-      <div class="row"><a class="btn" href="#/fases">Abrir EAP e fases</a>${modelos.length ? '' : `<a class="btn" href="#/importar">${I.upload} Importar planilha</a>`}</div>
+      <p style="margin:0">Novas obras começam pelo modelo <b>${esc(padrao.nome)}</b>${padrao.base ? ' (modelo de etapas do GEPLAN). Para usar o seu, duplique-o na aba Fases e ajuste.' : '.'}</p>
+      <div class="row"><a class="btn" href="#/fases">Abrir EAP e fases</a></div>
     </div>
     <div class="card card-pad stack">
       <h2>Composições e base SINAPI</h2>

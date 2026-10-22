@@ -5,16 +5,17 @@ import * as store from './store.js';
 import { filhosDe, renumerar, novaAtividade, TIPOS, uid } from './model.js';
 import { formatNotacao, resolverNotacao } from './predecessoras.js';
 import { criaCiclo } from './cpm.js';
-import { modeloVazio, duplicarModelo, etapasDoModelo } from './importador.js';
+import { modeloVazio, duplicarModelo, etapasDoModelo, modelosDisponiveis, modeloInicial } from './importador.js';
 import { esc, I, ui, toast, formDialog, ask, commit, queueRender, parseNum, fmtIn } from './ui.js';
 
 const vazio = (v) => v === '' || v === null || v === undefined;
 
 export function modeloAtual(id) {
   const lib = store.lib();
-  const ms = lib.modelosEAP || [];
-  return ms.find((m) => m.id === id) || ms.find((m) => m.id === lib.modeloPadraoId) || ms[0] || null;
+  return modelosDisponiveis(lib).find((m) => m.id === id) || modeloInicial(lib);
 }
+/** O modelo do GEPLAN é fixo: para mudar, duplica-se. Devolve true (e avisa) quando não pode editar. */
+const somenteLeitura = (M) => { if (!M?.base) return false; toast('O modelo do GEPLAN é fixo. Use "Duplicar para personalizar" e edite a cópia.', 5000); return true; };
 
 /* ---------- expandir/recolher (nível 1 aberto por padrão) ---------- */
 function expSet(M) {
@@ -50,12 +51,13 @@ function linhas(M, filhos, busca) {
 
 export function viewFases(route) {
   const lib = store.lib();
-  const modelos = lib.modelosEAP || [];
+  const modelos = modelosDisponiveis(lib);
   const M = modeloAtual(route.id);
-  const cab = `<div class="page-head"><div><h1>Fases</h1><div class="muted">Biblioteca de fases (modelos de EAP), independente das obras. Edite à vontade: as obras puxam as fases daqui.</div></div>
+  const inicial = modeloInicial(lib);
+  const ro = !!M.base;
+  const dis = ro ? 'disabled' : '';
+  const cab = `<div class="page-head"><div><h1>Fases</h1><div class="muted">Biblioteca de fases (modelos de EAP), independente das obras. As obras puxam as etapas daqui; depois, na obra, tudo é editável.</div></div>
     <div class="row"><a class="btn" href="#/importar">${I.upload} Importar planilha</a><button class="btn primary" data-act="fModeloNovo">${I.plus} Novo modelo</button></div></div>`;
-  if (!M) return `${cab}<div class="card empty"><p>Nenhum modelo de fases ainda.</p><p class="small">Importe a planilha modelo ou crie um modelo do zero e vá acrescentando as etapas.</p>
-    <div class="row" style="justify-content:center"><a class="btn" href="#/importar">${I.upload} Importar planilha</a><button class="btn primary" data-act="fModeloNovo">${I.plus} Criar modelo do zero</button></div></div>`;
   const filhos = filhosDe(M);
   const porId = new Map(M.eap.map((a) => [a.id, a]));
   const depsDe = new Map();
@@ -69,22 +71,23 @@ export function viewFases(route) {
     const base = a.varianteDe ? porId.get(a.varianteDe) : null;
     return `<tr class="lvl${Math.min(a.nivel, 3)}">
       <td class="nowrap code-cell" style="padding-left:${6 + (a.nivel - 1) * 14}px">${temF ? `<button class="tog" data-act="fToggle" data-id="${a.id}">${ab ? I.down : I.right}</button>` : '<span class="tog-sp"></span>'}${esc(a.codigo)}</td>
-      <td class="desc"><input class="cell" data-chg="fCampo" data-f="descricao" data-id="${a.id}" data-key="fd:${a.id}" value="${esc(a.descricao)}">${base ? `<div class="small muted">alternativa à etapa ${esc(base.codigo)} — ${esc(base.descricao)}</div>` : ''}</td>
-      <td>${leaf ? `<select class="cell w-tipo" data-chg="fCampo" data-f="tipo" data-id="${a.id}">${TIPOS.map((t) => `<option ${t === a.tipo ? 'selected' : ''}>${t}</option>`).join('')}</select>` : `<span class="muted small">${temF ? (filhos.get(a.id) || []).length + ' itens' : ''}</span>`}</td>
-      <td>${leaf ? `<input class="cell w-sm" inputmode="decimal" data-chg="fCampo" data-f="equipe" data-id="${a.id}" value="${vazio(a.equipe) ? '' : fmtIn(a.equipe, 2)}" placeholder="—">` : ''}</td>
-      <td>${leaf ? `<input class="cell w-sm" inputmode="numeric" data-chg="fCampo" data-f="duracaoManual" data-id="${a.id}" value="${vazio(a.duracaoManual) ? '' : a.duracaoManual}" placeholder="—">` : ''}</td>
-      <td>${leaf ? `<input class="cell w-pred" data-chg="fPred" data-id="${a.id}" data-key="fp:${a.id}" value="${esc(formatNotacao(depsDe.get(a.id) || [], codigoDe) || a.predTexto || '')}" placeholder="ex.: 3.4.2 ou 3.1 II+5">` : `<span class="muted small">${esc((a.obs || '').replace(/^Predecessora original \(resumo\): /, 'orig.: '))}</span>`}</td>
-      <td><button class="icon-btn" title="Mais opções" data-act="fMenu" data-id="${a.id}">${I.more}</button></td>
+      <td class="desc"><input class="cell" data-chg="fCampo" data-f="descricao" data-id="${a.id}" data-key="fd:${a.id}" value="${esc(a.descricao)}" ${dis}>${base ? `<div class="small muted">alternativa à etapa ${esc(base.codigo)} — ${esc(base.descricao)}</div>` : ''}</td>
+      <td>${leaf ? `<select class="cell w-tipo" data-chg="fCampo" data-f="tipo" data-id="${a.id}" ${dis}>${TIPOS.map((t) => `<option ${t === a.tipo ? 'selected' : ''}>${t}</option>`).join('')}</select>` : `<span class="muted small">${temF ? (filhos.get(a.id) || []).length + ' itens' : ''}</span>`}</td>
+      <td>${leaf ? `<input class="cell w-sm" inputmode="decimal" data-chg="fCampo" data-f="equipe" data-id="${a.id}" value="${vazio(a.equipe) ? '' : fmtIn(a.equipe, 2)}" placeholder="—" ${dis}>` : ''}</td>
+      <td>${leaf ? `<input class="cell w-sm" inputmode="numeric" data-chg="fCampo" data-f="duracaoManual" data-id="${a.id}" value="${vazio(a.duracaoManual) ? '' : a.duracaoManual}" placeholder="—" ${dis}>` : ''}</td>
+      <td>${leaf ? `<input class="cell w-pred" data-chg="fPred" data-id="${a.id}" data-key="fp:${a.id}" value="${esc(formatNotacao(depsDe.get(a.id) || [], codigoDe) || a.predTexto || '')}" placeholder="ex.: 3.4.2 ou 3.1 II+5" ${dis}>` : `<span class="muted small">${esc((a.obs || '').replace(/^Predecessora original \(resumo\): /, 'orig.: '))}</span>`}</td>
+      <td>${ro ? '' : `<button class="icon-btn" title="Mais opções" data-act="fMenu" data-id="${a.id}">${I.more}</button>`}</td>
     </tr>`;
   }).join('');
   return `${cab}
     <div class="card card-pad row" style="margin-bottom:14px">
-      <label class="field" style="flex:1;min-width:220px">Modelo<select data-chg="fModeloSel">${modelos.map((m) => `<option value="${m.id}" ${m.id === M.id ? 'selected' : ''}>${m.id === lib.modeloPadraoId ? '★ ' : ''}${esc(m.nome)}</option>`).join('')}</select></label>
-      ${M.id === lib.modeloPadraoId ? '<span class="badge info">modelo inicial</span>' : `<button class="btn sm" data-act="fModeloPadrao" data-id="${M.id}">Tornar inicial</button>`}
-      <button class="btn sm" data-act="fModeloRenomear" data-id="${M.id}">Renomear</button>
-      <button class="btn sm" data-act="fModeloDuplicar" data-id="${M.id}">${I.copy} Duplicar</button>
-      <button class="btn sm danger" data-act="fModeloExcluir" data-id="${M.id}">${I.trash} Excluir</button>
+      <label class="field" style="flex:1;min-width:220px">Modelo<select data-chg="fModeloSel">${modelos.map((m) => `<option value="${m.id}" ${m.id === M.id ? 'selected' : ''}>${m === inicial ? '★ ' : ''}${esc(m.nome)}</option>`).join('')}</select></label>
+      ${M === inicial ? '<span class="badge info">modelo inicial</span>' : ro ? '' : `<button class="btn sm" data-act="fModeloPadrao" data-id="${M.id}">Tornar inicial</button>`}
+      ${ro ? '' : `<button class="btn sm" data-act="fModeloRenomear" data-id="${M.id}">Renomear</button>`}
+      <button class="btn sm${ro ? ' primary' : ''}" data-act="fModeloDuplicar" data-id="${M.id}">${I.copy} ${ro ? 'Duplicar para personalizar' : 'Duplicar'}</button>
+      ${ro ? '' : `<button class="btn sm danger" data-act="fModeloExcluir" data-id="${M.id}">${I.trash} Excluir</button>`}
     </div>
+    ${ro ? '<div class="alert info" style="margin-bottom:14px">Este é o <b>modelo de etapas do GEPLAN</b> (fixo, igual para todas as empresas). Ele é só o ponto de partida: na obra você inclui, exclui, renomeia e move etapas e atividades à vontade. Para ter o seu próprio modelo, use <b>Duplicar para personalizar</b>.</div>' : ''}
     <div class="kpis" style="margin-bottom:14px">
       <div class="card kpi"><div class="k-label">Etapas</div><div class="k-value">${etapas.filter((e) => !e.variante).length}</div><div class="k-sub">${etapas.filter((e) => e.variante).length} alternativa(s)</div></div>
       <div class="card kpi"><div class="k-label">Atividades</div><div class="k-value">${nFolhas}</div></div>
@@ -94,7 +97,7 @@ export function viewFases(route) {
     <div class="row" style="margin-bottom:10px">
       <input data-inp="fasesBusca" data-key="fasesBusca" value="${esc(ui.fasesBusca || '')}" placeholder="Buscar fase ou atividade…" style="flex:1;min-width:180px">
       <div class="seg"><button data-act="fExpNivel" data-n="1">Etapas</button><button data-act="fExpNivel" data-n="2">Subetapas</button><button data-act="fExpNivel" data-n="9">Tudo</button></div>
-      <button class="btn sm primary" data-act="fNovaEtapa">${I.plus} Etapa</button>
+      ${ro ? '' : `<button class="btn sm primary" data-act="fNovaEtapa">${I.plus} Etapa</button>`}
     </div>
     ${M.eap.length ? `<div class="card table-wrap tree-wrap"><table class="data tree">
       <thead><tr><th>Código</th><th>Fase / atividade</th><th>Tipo</th><th title="Nº de profissionais da função líder">Equipe</th><th title="Duração manual (dias úteis) — para cura, fornecedor, documentação…">Duração</th><th>Predecessoras</th><th></th></tr></thead>
@@ -202,11 +205,17 @@ export const acoesFases = {
     if (!v) return; M.nome = v.nome.trim(); commit(lib);
   },
   async fModeloDuplicar(d) {
-    const lib = store.lib(); const M = lib.modelosEAP.find((x) => x.id === d.id);
-    const v = await formDialog({ title: 'Duplicar modelo', ok: 'Duplicar', fields: [{ name: 'nome', label: 'Nome da cópia', required: true, value: `${M.nome} (cópia)` }] });
+    const lib = store.lib(); const M = modelosDisponiveis(lib).find((x) => x.id === d.id);
+    const semProprio = !(lib.modelosEAP || []).length;
+    const v = await formDialog({ title: 'Duplicar modelo', ok: 'Duplicar', fields: [
+      { name: 'nome', label: 'Nome da cópia', required: true, value: M.base ? 'Meu modelo de etapas' : `${M.nome} (cópia)` },
+      { name: 'padrao', label: 'Usar como modelo inicial das novas obras', type: 'checkbox', value: semProprio },
+    ] });
     if (!v) return;
     const C = duplicarModelo(M, v.nome.trim());
-    lib.modelosEAP.push(C); store.touch(lib);
+    lib.modelosEAP.push(C);
+    if (v.padrao || !lib.modeloPadraoId) lib.modeloPadraoId = C.id;
+    store.touch(lib);
     location.hash = `#/fases/${C.id}`;
   },
   async fModeloExcluir(d) {
@@ -224,6 +233,7 @@ export const acoesFases = {
   },
   async fNovaEtapa() {
     const M = M_(); const lib = store.lib();
+    if (somenteLeitura(M)) return;
     const v = await formDialog({ title: 'Nova etapa', ok: 'Criar', fields: [{ name: 'descricao', label: 'Nome da etapa', required: true, placeholder: 'ex.: Muro de arrimo' }] });
     if (!v) return;
     const a = novaAtividade({ descricao: v.descricao.trim() });
@@ -231,13 +241,14 @@ export const acoesFases = {
     ui.pendingFocus = `fd:${a.id}`;
     commit(lib);
   },
-  fMenu(d) { const M = M_(); menu(M, ativ(M, d.id)); },
+  fMenu(d) { const M = M_(); if (somenteLeitura(M)) return; menu(M, ativ(M, d.id)); },
 };
 
 export const mudancasFases = {
   fModeloSel(d, el) { location.hash = `#/fases/${el.value}`; },
   fCampo(d, el) {
     const M = M_(); const a = ativ(M, d.id); const lib = store.lib();
+    if (somenteLeitura(M)) return queueRender();
     if (d.f === 'descricao') { if (!el.value.trim()) return queueRender(); a.descricao = el.value.trim(); }
     else if (d.f === 'equipe' || d.f === 'duracaoManual') { const n = parseNum(el.value); a[d.f] = n == null ? null : Math.max(0, d.f === 'duracaoManual' ? Math.round(n) : n); }
     else a[d.f] = el.value;
@@ -245,6 +256,7 @@ export const mudancasFases = {
   },
   fPred(d, el) {
     const M = M_(); const a = ativ(M, d.id); const lib = store.lib();
+    if (somenteLeitura(M)) return queueRender();
     try {
       const r = resolverNotacao(el.value, a.id, new Map(M.eap.map((x) => [x.codigo, x.id])));
       if (r.textoLivre) { a.predTexto = el.value.trim(); M.dependencias = M.dependencias.filter((x) => x.atividadeId !== a.id); return commit(lib); }

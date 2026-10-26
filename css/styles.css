@@ -641,3 +641,9 @@ ul.lista { margin: 8px 0; padding-left: 18px; font-size: 13px; } ul.lista li { m
 .progress.duo > .p { background: var(--series-plan); } .progress.duo > .r { top: 5px; background: var(--series-real); }
 fieldset { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px 10px; } legend { font-size: 12px; color: var(--text-2); padding: 0 4px; }
 .lin { margin-bottom: 6px; } .diario-item { padding: 12px 14px; }
+
+/* Entregas: painel de pedidos por obra */
+.kpi-alerta { border-top: 3px solid var(--crit); }
+.kpi-alerta .k-value { color: var(--crit); }
+.warn-ink { color: var(--warn); }
+.painel-obra { gap: 4px; }

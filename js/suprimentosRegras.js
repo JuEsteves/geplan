@@ -107,6 +107,44 @@ export function resumoPedido(p, grupos, hoje) {
   };
 }
 
+/**
+ * Painel de acompanhamento por obra (Entregas e recebimentos). Conta grupos pela etapa: em compra (análise/cotação),
+ * aguardando entrega (comprado, aguardando, retirada, parcial), atrasados (aguardando com previsão vencida) e pedidos
+ * abertos/concluídos. Pedidos cancelados ficam fora. Entregas desfeitas não contam. Retorna Map(obra → números).
+ */
+export function painelPorObra({ pedidos = [], grupos = [], entregas = [], hoje }) {
+  const m = new Map();
+  const de = (pid) => {
+    if (!m.has(pid)) m.set(pid, { pedidosAbertos: 0, concluidos: 0, emCompra: 0, aguardando: 0, parciais: 0, retirada: 0, atrasados: 0, proximaPrevisao: null, ultimaEntrega: null, entregas: 0 });
+    return m.get(pid);
+  };
+  const ativos = new Map(pedidos.filter((p) => p.status !== 'cancelado' && !p.deleted_at).map((p) => [p.id, p]));
+  for (const p of ativos.values()) {
+    const t = de(p.project_id);
+    if (p.status === 'concluido') t.concluidos++; else t.pedidosAbertos++;
+  }
+  for (const g of grupos) {
+    const p = ativos.get(g.order_id);
+    if (!p || g.deleted_at) continue;
+    const t = de(p.project_id), etapa = etapaGrupo(g.status);
+    if (etapa <= 2) t.emCompra++;
+    else if (etapa === 3) {
+      t.aguardando++;
+      if (g.status === 'entrega_parcial') t.parciais++;
+      if (g.status === 'retirada') t.retirada++;
+      if (g.expected_date && g.expected_date < hoje) t.atrasados++;
+      if (g.expected_date && (!t.proximaPrevisao || g.expected_date < t.proximaPrevisao)) t.proximaPrevisao = g.expected_date;
+    }
+  }
+  for (const e of entregas) {
+    if (e.deleted_at) continue;
+    const t = de(e.project_id);
+    t.entregas++;
+    if (!t.ultimaEntrega || e.delivery_date > t.ultimaEntrega) t.ultimaEntrega = e.delivery_date;
+  }
+  return m;
+}
+
 /** Filtros do quadro. `aux.fornecedoresDoPedido(p)` → nomes de fornecedores dos grupos. */
 export function filtrarPedidos(pedidos, f = {}, aux = {}) {
   const norm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();

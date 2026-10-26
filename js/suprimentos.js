@@ -14,11 +14,11 @@ import { obraEmFoco, ir } from './escopo.js';
 import { datalistFornecedores, idDoFornecedorPorNome, carregarFornecedores, categoriasFornecedor } from './fornecedores.js';
 import {
   STATUS_GRUPO, STATUS_PEDIDO, COLUNAS, PASSAGENS_MANUAIS, OCORRENCIAS, etapaGrupo, numeroPedido, comparativoCotacoes,
-  recebidoPorItem, itensComSaldo, pendenciasPedido, resumoPedido, filtrarPedidos, validarItens,
+  recebidoPorItem, itensComSaldo, pendenciasPedido, resumoPedido, filtrarPedidos, validarItens, painelPorObra,
 } from './suprimentosRegras.js';
 
 const vazio = () => ({ carregado: false, carregando: false, erro: '', em: 0, pedidos: [], grupos: new Map(), itens: new Map(),
-  cotacoes: new Map(), entregas: new Map(), itensEntrega: [], recebido: new Map(), eventos: new Map(), arquivos: new Map() });
+  cotacoes: new Map(), entregas: new Map(), entregasLista: [], itensEntrega: [], recebido: new Map(), eventos: new Map(), arquivos: new Map() });
 const S = vazio();
 const UNIDADES = ['un', 'pç', 'sc', 'kg', 't', 'm', 'm²', 'm³', 'l', 'cx', 'barra', 'dz', 'lata', 'galão', 'rolo', 'milheiro', 'jogo', 'vb'];
 const ABAS = [['resumo', 'Resumo'], ['grupos', 'Grupos de materiais'], ['compras', 'Cotações e compras'], ['entregas', 'Entregas'], ['historico', 'Histórico e comentários']];
@@ -54,7 +54,7 @@ export async function carregarSuprimentos(forcar = false) {
   S.carregando = true; S.erro = '';
   try {
     const ids = store.obras().map((o) => o.id);
-    if (!ids.length) Object.assign(S, { pedidos: [], grupos: new Map(), itens: new Map(), cotacoes: new Map(), entregas: new Map(), itensEntrega: [], recebido: new Map() });
+    if (!ids.length) Object.assign(S, { pedidos: [], grupos: new Map(), itens: new Map(), cotacoes: new Map(), entregas: new Map(), entregasLista: [], itensEntrega: [], recebido: new Map() });
     else {
       const c = await sb();
       const [peds, grs, its, cots, ents, ients] = await Promise.all([
@@ -71,6 +71,7 @@ export async function carregarSuprimentos(forcar = false) {
       S.cotacoes = agrupar(ok(cots, 'cotações') || [], 'group_id');
       const entregas = ok(ents, 'entregas') || [];
       S.entregas = agrupar(entregas, 'group_id');
+      S.entregasLista = entregas;
       S.itensEntrega = ok(ients, 'entregas') || [];
       S.recebido = recebidoPorItem(entregas, S.itensEntrega);
     }
@@ -355,20 +356,84 @@ function abaHistorico(p) {
       <div class="muted small">Registrado pelo banco a cada mudança (etapas, cotações, compras, previsões, entregas, cancelamentos). Não pode ser editado nem apagado.</div></div>`;
 }
 
-/* ----- Entregas (todas as obras) ----- */
+/* ----- Entregas: painel por obra + aguardando entrega + recebidas recentemente ----- */
+const SITUACOES_ENTREGA = [['', 'Todas'], ['atrasada', 'Atrasadas'], ['aguardando', 'Aguardando entrega'], ['retirada', 'Disponível para retirada'], ['parcial', 'Entrega parcial']];
+const ZERO_PAINEL = { pedidosAbertos: 0, concluidos: 0, emCompra: 0, aguardando: 0, parciais: 0, retirada: 0, atrasados: 0, proximaPrevisao: null, ultimaEntrega: null, entregas: 0 };
+function somarPainel(lista) {
+  const t = { ...ZERO_PAINEL };
+  for (const x of lista) {
+    for (const k of ['pedidosAbertos', 'concluidos', 'emCompra', 'aguardando', 'parciais', 'retirada', 'atrasados', 'entregas']) t[k] += x[k];
+    if (x.proximaPrevisao && (!t.proximaPrevisao || x.proximaPrevisao < t.proximaPrevisao)) t.proximaPrevisao = x.proximaPrevisao;
+    if (x.ultimaEntrega && (!t.ultimaEntrega || x.ultimaEntrega > t.ultimaEntrega)) t.ultimaEntrega = x.ultimaEntrega;
+  }
+  return t;
+}
+
 function viewEntregas() {
   const hoje = todayISO();
-  const linhas = [];
   const foco = obraEmFoco();
-  for (const p of S.pedidos) if (!foco || p.project_id === foco) for (const g of gruposDe(p.id)) if (etapaGrupo(g.status) === 3) linhas.push({ p, g, atrasada: !!(g.expected_date && g.expected_date < hoje) });
+  const f = ui.entF ||= { obra: '', situacao: '' };
+  const obraSel = foco || f.obra;
+  const painel = painelPorObra({ pedidos: S.pedidos, grupos: [...S.grupos.values()].flat(), entregas: S.entregasLista, hoje });
+  const t = obraSel ? (painel.get(obraSel) || ZERO_PAINEL) : somarPainel([...painel.values()]);
+  const kpi = (v, rot, sub = '', cls = '') => `<div class="card kpi ${cls}"><div class="k-label">${rot}</div><div class="k-value">${v}</div>${sub ? `<div class="k-sub">${sub}</div>` : ''}</div>`;
+
+  // grupos comprados aguardando entrega/retirada
+  const casa = (g, atrasada) => ({ '': true, atrasada, aguardando: ['comprado', 'aguardando_entrega'].includes(g.status), retirada: g.status === 'retirada', parcial: g.status === 'entrega_parcial' }[f.situacao]);
+  const linhas = [];
+  for (const p of S.pedidos) {
+    if (obraSel && p.project_id !== obraSel) continue;
+    for (const g of gruposDe(p.id)) {
+      if (etapaGrupo(g.status) !== 3) continue;
+      const atrasada = !!(g.expected_date && g.expected_date < hoje);
+      if (casa(g, atrasada)) linhas.push({ p, g, atrasada });
+    }
+  }
   linhas.sort((a, b) => Number(b.atrasada) - Number(a.atrasada) || String(a.g.expected_date || '9999').localeCompare(String(b.g.expected_date || '9999')));
-  return `<div class="page-head"><div><h1>Entregas e recebimentos</h1><div class="muted">Grupos comprados aguardando entrega ou retirada, ${foco ? 'dos pedidos desta obra' : 'de todos os pedidos'}. Atrasada = previsão anterior a hoje.</div></div>
+
+  // entregas e retiradas registradas (as mais recentes primeiro)
+  const grupoPorId = new Map([...S.grupos.values()].flat().map((g) => [g.id, g]));
+  const recebidas = S.entregasLista.filter((e) => !obraSel || e.project_id === obraSel).slice(0, 12);
+
+  // painel por obra (só no menu geral, sem obra escolhida): uma coluna/cartão por obra, as com atraso primeiro
+  const obras = store.obras().map((o) => ({ o, n: painel.get(o.id) || ZERO_PAINEL }))
+    .sort((a, b) => b.n.atrasados - a.n.atrasados || b.n.aguardando - a.n.aguardando || b.n.pedidosAbertos - a.n.pedidosAbertos || a.o.nome.localeCompare(b.o.nome, 'pt-BR'));
+  const linhaN = (rot, v, cls = '') => `<div class="row between small"><span class="muted">${rot}</span><b class="${cls}">${v}</b></div>`;
+  const cartaoObra = ({ o, n }) => `<a class="card obra-card stack painel-obra" href="#/obra/${o.id}/entregas" style="gap:4px">
+      <div class="row between"><b>${esc(o.nome)}</b>${n.atrasados ? `<span class="badge crit">${n.atrasados} atrasado(s)</span>` : n.aguardando ? '<span class="badge warn">aguardando</span>' : ''}</div>
+      ${linhaN('Pedidos em aberto', n.pedidosAbertos)}${linhaN('Grupos em compra (análise/cotação)', n.emCompra)}
+      ${linhaN('Aguardando entrega ou retirada', n.aguardando, n.aguardando ? 'warn-ink' : '')}${n.parciais ? linhaN('— com entrega parcial', n.parciais) : ''}
+      ${linhaN('Pedidos concluídos', n.concluidos)}
+      <div class="muted small">${n.proximaPrevisao ? `Próxima previsão: ${isoBR(n.proximaPrevisao)}` : 'Sem previsão pendente'} · ${n.ultimaEntrega ? `última entrega ${isoBR(n.ultimaEntrega)}` : 'nenhuma entrega'}</div></a>`;
+
+  return `<div class="page-head"><div><h1>Entregas e recebimentos</h1><div class="muted">${foco ? 'Acompanhamento dos pedidos desta obra' : 'Acompanhamento dos pedidos por obra'}: o que está em compra, o que aguarda entrega ou retirada (atrasada = previsão anterior a hoje) e o que já chegou.</div></div>
     <div class="row"><button class="btn" data-act="supAtualizar">Atualizar</button></div></div>
-  <div class="stack">${linhas.length ? `<div class="card table-wrap"><table class="data"><thead><tr><th>Pedido</th><th>Grupo</th><th>Obra</th><th>Fornecedor</th><th>Previsão</th><th>Etapa</th><th></th></tr></thead><tbody>
+  <div class="stack">
+    <div class="kpis kpis-5">
+      ${kpi(t.pedidosAbertos, 'Pedidos em aberto', `${t.concluidos} concluído(s)`)}
+      ${kpi(t.emCompra, 'Grupos em compra', 'análise ou cotação')}
+      ${kpi(t.aguardando, 'Aguardando entrega', t.proximaPrevisao ? `próxima: ${isoBR(t.proximaPrevisao)}` : 'sem previsão pendente')}
+      ${kpi(t.atrasados, 'Atrasados', t.parciais ? `${t.parciais} com entrega parcial` : '', t.atrasados ? 'kpi-alerta' : '')}
+      ${kpi(t.entregas, 'Entregas registradas', t.ultimaEntrega ? `última: ${isoBR(t.ultimaEntrega)}` : '')}
+    </div>
+    ${foco ? '' : `<div class="row between"><h2 style="margin:0">Por obra</h2>${f.obra ? `<button class="btn sm" data-act="entObra" data-id="">Ver todas as obras</button>` : ''}</div>
+    ${f.obra ? '' : obras.length ? `<div class="obras-grid">${obras.map(cartaoObra).join('')}</div>` : '<div class="card empty"><p>Nenhuma obra.</p></div>'}`}
+    <div class="row between" style="flex-wrap:wrap;gap:8px"><h2 style="margin:0">Aguardando entrega ou retirada</h2>
+      <div class="row" style="gap:8px">${foco ? '' : `<select data-chg="entFiltro" data-k="obra" style="width:auto"><option value="">Todas as obras</option>${store.obras().map((o) => `<option value="${o.id}" ${o.id === f.obra ? 'selected' : ''}>${esc(o.nome)}</option>`).join('')}</select>`}
+        <select data-chg="entFiltro" data-k="situacao" style="width:auto">${SITUACOES_ENTREGA.map(([k, r]) => `<option value="${k}" ${k === f.situacao ? 'selected' : ''}>${r}</option>`).join('')}</select></div></div>
+    ${linhas.length ? `<div class="card table-wrap"><table class="data"><thead><tr><th>Pedido</th><th>Grupo</th>${obraSel ? '' : '<th>Obra</th>'}<th>Fornecedor</th><th>Previsão</th><th>Etapa</th><th></th></tr></thead><tbody>
     ${linhas.map(({ p, g, atrasada }) => `<tr><td class="nowrap"><a href="#/suprimentos/pedido/${p.id}/entregas">${numeroPedido(p.number)}</a><div class="muted small">${esc(p.title)}</div></td><td><b>${esc(g.name)}</b></td>
-      <td class="small">${esc(obraNome(p.project_id))}</td><td class="small">${esc(g.supplier_name)}</td><td class="small nowrap">${previsao(g)}${atrasada ? ' <span class="badge crit">atrasada</span>' : ''}</td><td>${bGrupo(g.status)}</td>
+      ${obraSel ? '' : `<td class="small"><a href="#/obra/${p.project_id}/entregas">${esc(obraNome(p.project_id))}</a></td>`}<td class="small">${esc(g.supplier_name)}</td><td class="small nowrap">${previsao(g)}${atrasada ? ' <span class="badge crit">atrasada</span>' : ''}</td><td>${bGrupo(g.status)}</td>
       <td>${podeReceber() ? `<button class="btn sm primary" data-act="supReceber" data-id="${p.id}" data-g="${g.id}">Registrar</button>` : ''}</td></tr>`).join('')}
-  </tbody></table></div>` : '<div class="card empty"><p>Nenhum grupo aguardando entrega.</p></div>'}
+  </tbody></table></div>` : `<div class="card empty"><p>Nenhum grupo ${f.situacao ? 'nesta situação' : 'aguardando entrega'}.</p></div>`}
+    <h2 style="margin:0">Recebidas recentemente</h2>
+    ${recebidas.length ? `<div class="card table-wrap"><table class="data"><thead><tr><th>Data</th><th>Pedido · grupo</th>${obraSel ? '' : '<th>Obra</th>'}<th>Fornecedor</th><th>Conferência</th><th>Recebido por</th></tr></thead><tbody>
+      ${recebidas.map((e) => { const g = grupoPorId.get(e.group_id); const p = g && pedidoPorId(g.order_id);
+        return `<tr><td class="nowrap">${isoBR(e.delivery_date)}<div class="muted small">${e.kind === 'retirada' ? 'retirada' : 'entrega'}</div></td>
+          <td class="small">${p ? `<a href="#/suprimentos/pedido/${p.id}/entregas">${numeroPedido(p.number)}</a> · ` : ''}${esc(g?.name || '')}</td>${obraSel ? '' : `<td class="small">${esc(obraNome(e.project_id))}</td>`}
+          <td class="small">${esc(g?.supplier_name || '')}</td>
+          <td class="small">${e.quantity_ok ? 'Conforme' : '<span class="badge warn">quantidade divergente</span>'}${e.issue && e.issue !== 'nenhuma' ? ` <span class="badge crit">${esc(OCORRENCIAS[e.issue] || e.issue)}</span>` : ''}</td>
+          <td class="small">${esc(e.receiver_label || '')}</td></tr>`; }).join('')}</tbody></table></div>` : '<div class="card empty"><p>Nenhuma entrega registrada.</p></div>'}
   ${!podeReceber() ? '<div class="muted small">Seu usuário não tem a liberação para registrar entregas.</div>' : ''}</div>`;
 }
 
@@ -773,6 +838,7 @@ export const acoesSuprimentos = {
   },
   supLimparFiltros() { const foco = obraEmFoco(); if (foco) delete (ui.supFObra || {})[foco]; else ui.supF = null; queueRender(); },
   async supAtualizar() { await carregarSuprimentos(true); },
+  entObra(d) { (ui.entF ||= { obra: '', situacao: '' }).obra = d.id || ''; queueRender(); },
 };
 export const mudancasSuprimentos = {
   supFiltro(d, el) {
@@ -781,5 +847,6 @@ export const mudancasSuprimentos = {
     if (d.k === 'obra') f.fase = '';
     queueRender();
   },
+  entFiltro(d, el) { (ui.entF ||= { obra: '', situacao: '' })[d.k] = el.value; queueRender(); },
 };
 export const entradasSuprimentos = { supBusca(el) { filtrosQuadro().busca = el.value; queueRender(); } };

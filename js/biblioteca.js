@@ -284,8 +284,10 @@ export const acoesBiblioteca = {
     if (v.base === 'pdf' && !ia.ok) { toast(ia.motivo, 6000); return; }
     if (v.base === 'exemplo') {
       const nome = /demonstra/i.test(v.nome) ? v.nome.trim() : `${v.nome.trim()} (demonstração)`;
-      const { obra } = criarObraExemplo(lib, { nome, inicio: v.inicio, usuario: usuarioAtual() });
-      store.touch(lib);
+      // biblioteca lida de novo: enquanto o diálogo estava aberto, a sincronização pode ter trocado o objeto
+      const libAtual = store.lib();
+      const { obra } = criarObraExemplo(libAtual, { nome, inicio: v.inicio, usuario: usuarioAtual() });
+      store.touch(libAtual);
       store.addObra(obra);
       location.hash = `#/obra/${obra.id}/atividades`;
       setTimeout(() => info('Obra de exemplo criada', `<p style="margin-top:0">A obra <b>${esc(nome)}</b> já tem a EAP completa do modelo, um orçamento ilustrativo com composições (códigos EX-…), vínculos orçamento × EAP e equipes — o cronograma, a Curva S e os custos já calculam.</p>

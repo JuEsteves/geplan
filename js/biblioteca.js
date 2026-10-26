@@ -7,8 +7,13 @@ import { avanco } from './curvaS.js';
 import { novaComposicao, FONTES, uid, novaObra } from './model.js';
 import { lerArquivo, interpretar, aplicarComposicoes, modeloDaPlanilha, etapasDoModelo, selecaoPadrao, instanciarModelo, modelosDisponiveis, modeloInicial } from './importador.js';
 import { leituraDisponivel, lerProjeto } from './leituraProjeto.js';
+import { criarObraExemplo } from './obraExemplo.js';
+import { savedUser } from './drive.js';
+import * as nuvemCtx from './nuvem/nuvem.js';
 import { fmtBR, fmtNum, fmtBRL, todayISO, todayDay } from './schedule.js';
 import { esc, I, ui, toast, formDialog, ask, info, commit, queueRender, parseNum, fmtIn } from './ui.js';
+
+const usuarioAtual = () => nuvemCtx.contexto()?.email || savedUser()?.emailAddress || '';
 
 const natural = (a, b) => String(a).localeCompare(String(b), 'pt-BR', { numeric: true });
 
@@ -267,6 +272,7 @@ export const acoesBiblioteca = {
       { value: `m:${pad.id}`, label: `★ ${pad.nome} — escolher as etapas` },
       ...modelos.filter((m) => m !== pad).map((m) => ({ value: `m:${m.id}`, label: `${m.nome} — escolher as etapas` })),
       { value: '', label: 'EAP em branco (montar do zero)' },
+      { value: 'exemplo', label: 'Obra de exemplo (demonstração) — já com EAP, orçamento e vínculos, para conhecer o sistema' },
       ...obras.map((o) => ({ value: `o:${o.id}`, label: `Cópia da obra: ${o.nome}` })),
     ];
     const v = await formDialog({ title: 'Nova obra', ok: 'Continuar', fields: [
@@ -276,6 +282,16 @@ export const acoesBiblioteca = {
     ] });
     if (!v) return;
     if (v.base === 'pdf' && !ia.ok) { toast(ia.motivo, 6000); return; }
+    if (v.base === 'exemplo') {
+      const nome = /demonstra/i.test(v.nome) ? v.nome.trim() : `${v.nome.trim()} (demonstração)`;
+      const { obra } = criarObraExemplo(lib, { nome, inicio: v.inicio, usuario: usuarioAtual() });
+      store.touch(lib);
+      store.addObra(obra);
+      location.hash = `#/obra/${obra.id}/atividades`;
+      setTimeout(() => info('Obra de exemplo criada', `<p style="margin-top:0">A obra <b>${esc(nome)}</b> já tem a EAP completa do modelo, um orçamento ilustrativo com composições (códigos EX-…), vínculos orçamento × EAP e equipes — o cronograma, a Curva S e os custos já calculam.</p>
+        <p class="small muted">Os valores são de <b>demonstração</b> (premissas ilustrativas), não de uma obra real. Use à vontade e exclua quando quiser (Cadastro › Excluir obra).</p>`), 80);
+      return;
+    }
     if (v.base.startsWith('m:')) return criarObraDoModelo(modelos.find((m) => m.id === v.base.slice(2)), v.nome.trim(), v.inicio);
     let o;
     if (v.base.startsWith('o:')) { o = store.duplicateObra(store.obra(v.base.slice(2)), v.nome.trim()); o.inicio = v.inicio; store.touch(o); }

@@ -13,14 +13,41 @@ import { exportExcel, exportPDF } from './export.js';
 import { modeloDaObra, instanciarModelo, modelosDisponiveis, modeloInicial } from './importador.js';
 import { escolherFases } from './biblioteca.js';
 import { leituraDisponivel, lerProjeto } from './leituraProjeto.js';
-import { tabPainel, tabMedicoes, tabDiario, tabFinanceiro, usuario } from './gestao.js';
+import { tabPainel, tabMedicoes, tabFinanceiro, usuario } from './gestao.js';
 import { bdiTCU, resumoOrcamento, snapshotOrcamento, compararOrcamento, valorAgregado } from './financeiro.js';
 import { importarOrcamentoExcel } from './orcImport.js';
+import { configurado as nuvemConfigurada } from './nuvem/supabase.js';
+import { viewSuprimentos } from './suprimentos.js';
+import { viewMedicoes, navMedicoes } from './medicoes.js';
+import { viewDiario } from './diario.js';
+import { comEscopo } from './escopo.js';
 
+// Tudo da obra fica dentro da página da obra, na ordem do trabalho. Compras e Entregas usam o banco (modo nuvem).
 export const TABS = [
-  ['painel', 'Painel'], ['orcamento', 'Orçamento'], ['vinculos', 'Vínculos'], ['atividades', 'Atividades'], ['gantt', 'Gantt'],
-  ['curva', 'Físico-financeiro'], ['medicoes', 'Medições'], ['diario', 'Diário de obra'], ['financeiro', 'Financeiro'], ['config', 'Cadastro'],
+  ['painel', 'Painel'], ['atividades', 'EAP'], ['orcamento', 'Orçamento'], ['vinculos', 'Vínculos'], ['gantt', 'Cronograma'],
+  ['curva', 'Físico-financeiro'], ['medicoes', 'Medições'], ['diario', 'Diário de obra'], ['compras', 'Compras', 'nuvem'],
+  ['entregas', 'Entregas', 'nuvem'], ['financeiro', 'Custos'], ['config', 'Cadastro'],
 ];
+const abasDaObra = () => TABS.filter(([, , so]) => so !== 'nuvem' || nuvemConfigurada());
+
+/**
+ * Módulos da empresa abertos dentro da obra (#/obra/<id>/<aba>/<resto>): a tela do módulo, só desta obra, com os links
+ * convertidos para o caminho da obra (js/escopo.js). O título do módulo vira subtítulo (o título é o da obra).
+ */
+function moduloNaObra(c, tab, resto) {
+  const { o } = c;
+  let html;
+  if (tab === 'compras') html = viewSuprimentos(resto[0] === 'pedido' ? { secao: 'pedido', id: resto[1], aba: resto[2] || 'resumo' } : { secao: 'quadro' });
+  else if (tab === 'entregas') html = viewSuprimentos({ secao: 'entregas' });
+  else if (tab === 'diario') html = viewDiario({ obra: o.id, secao: resto[0] || 'geral', id: resto[1] || '', modo: resto[2] || '' });
+  else if (tab === 'medicoes') {
+    // modo nuvem: boletins por atividade e profissional + avanço físico; modo local: só o avanço físico
+    if (!nuvemConfigurada()) return tabMedicoes(c);
+    if (resto[0] === 'avanco') return `${navMedicoes('avanco')}<div style="margin-top:12px">${tabMedicoes(c)}</div>`;
+    html = viewMedicoes({ secao: resto[0] || 'boletins', id: resto[1] || '' });
+  }
+  return comEscopo(html, o.id).replace(/<(\/?)h1\b/g, '<$1h2');
+}
 
 const natural = (a, b) => String(a).localeCompare(String(b), 'pt-BR', { numeric: true });
 const vazio = (v) => v === '' || v === null || v === undefined;
@@ -110,8 +137,10 @@ export function viewObra(route) {
   if (!o) return `<div class="card empty"><p>Obra não encontrada.</p><a class="btn" href="#/obras">Voltar</a></div>`;
   const c = contexto(o);
   const pedida = route.tab === 'acompanhamento' ? 'medicoes' : route.tab;
-  const tab = TABS.some(([k]) => k === pedida) ? pedida : 'painel';
-  const body = { painel: tabPainel, orcamento: tabOrcamento, vinculos: tabVinculos, atividades: tabAtividades, gantt: tabGantt, curva: tabCurva, medicoes: tabMedicoes, diario: tabDiario, financeiro: tabFinanceiro, config: tabConfig }[tab](c);
+  const abas = abasDaObra();
+  const tab = abas.some(([k]) => k === pedida) ? pedida : 'painel';
+  const body = ['compras', 'entregas', 'diario', 'medicoes'].includes(tab) ? moduloNaObra(c, tab, route.resto || [])
+    : { painel: tabPainel, orcamento: tabOrcamento, vinculos: tabVinculos, atividades: tabAtividades, gantt: tabGantt, curva: tabCurva, financeiro: tabFinanceiro, config: tabConfig }[tab](c);
   const temEAP = o.eap.length > 0;
   const alertas = c.calc.alertasItens + c.calc.alertasAtiv;
   return `<div class="page-head" style="margin-bottom:10px"><div>
@@ -126,7 +155,7 @@ export function viewObra(route) {
         ${alertas ? `· <a href="#/obra/${o.id}/atividades" data-act="verAlertas" class="badge warn" style="text-decoration:none">${I.alert} ${alertas} alerta${alertas > 1 ? 's' : ''}</a>` : ''}
       </div></div></div>
     ${caminhoDaObra(o, c)}
-    <nav class="tabs">${TABS.map(([k, l]) => `<a href="#/obra/${o.id}/${k}" class="${tab === k ? 'active' : ''}">${l}</a>`).join('')}</nav>
+    <nav class="tabs">${abas.map(([k, l]) => `<a href="#/obra/${o.id}/${k}" class="${tab === k ? 'active' : ''}">${l}</a>`).join('')}</nav>
     ${avisoDoPerfil()}
     ${c.cron.ciclo ? `<div class="alert err" style="margin-bottom:14px"><b>Dependência circular</b> entre ${c.cron.cicloIds.map((id) => c.codigoDe(id)).slice(0, 12).join(', ')}. Revise as predecessoras.</div>` : ''}
     ${body}`;

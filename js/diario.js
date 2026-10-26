@@ -19,6 +19,7 @@ import {
   TAMANHO_MAX_OBRA, TAMANHO_MAX_VIDEO, tamanhoLegivel, validarArquivo,
 } from './nuvem/arquivos.js';
 import { pode, liberado } from './permissoes.js';
+import { obraEmFoco, ir, rota } from './escopo.js';
 import { savedUser } from './drive.js';
 import { LIBS, loadScript } from './libs.js';
 
@@ -141,7 +142,8 @@ function viewPainelObra(o, secao) {
     return `<a href="#/diario/${o.id}/${k}" class="${k === secao ? 'active' : ''}" ${k === secao ? 'aria-current="page"' : ''}><span>${esc(rot)}</span>${cont !== '' ? `<span class="badge">${cont}</span>` : ''}</a>`;
   }).join('');
   const corpo = { geral: secaoGeral, tarefas: secaoTarefas, relatorios: secaoRelatorios, busca: secaoBusca, editar: secaoEditar }[secao] || secaoGeral;
-  return `<div class="page-head"><div><a class="muted small" href="#/diario">← Diário de obra</a><h1>${esc(o.nome)}</h1></div>
+  // dentro da página da obra, o nome e o "voltar" já estão no cabeçalho da obra
+  return `<div class="page-head"><div>${obraEmFoco() ? '<h1>Diário de obra</h1>' : `<a class="muted small" href="#/diario">← Diário de obra</a><h1>${esc(o.nome)}</h1>`}</div>
     ${podePreencher() ? `<a class="btn primary" href="#/diario/${o.id}/rdo/novo/editar">${I.plus} Novo relatório</a>` : ''}</div>
   <div class="diario-layout">
     <aside class="diario-lado card">${o.capa ? img(o.capa, 'diario-lado-capa', o.nome) : `<div class="diario-lado-capa diario-capa-vazia">${esc((o.nome || '?')[0])}</div>`}<nav class="diario-nav">${nav}</nav></aside>
@@ -697,7 +699,7 @@ async function gerarPdf(o, relatorios, { titulo, faseId = '' } = {}) {
 const obraDe = (d) => store.obra(d.obra);
 const rdoDe = (o, id) => (o.diario || []).find((x) => x.id === id);
 export const acoesDiario = {
-  rdoAbrir(d) { location.hash = `#/diario/${d.obra}/rdo/${d.id}`; },
+  rdoAbrir(d) { ir(`#/diario/${d.obra}/rdo/${d.id}`); },
   rdoLimparFiltro() { ui.diarioF = null; queueRender(); },
   rdoImprimir() { window.print(); },
   async rdoSalvar(dd) {
@@ -711,7 +713,7 @@ export const acoesDiario = {
     commit(o);
     if (novo) delete ui.rdoRascunho[`novo:${o.id}`];
     toast(novo ? `Relatório nº ${d.numero} criado.` : 'Relatório salvo.');
-    location.hash = dd.ver || novo ? `#/diario/${o.id}/rdo/${d.id}${dd.ver ? '' : '/editar'}` : location.hash;
+    ir(dd.ver || novo ? `#/diario/${o.id}/rdo/${d.id}${dd.ver ? '' : '/editar'}` : location.hash);
     if (!dd.ver && !novo) queueRender();
   },
   rdoDescartar(d) { delete (ui.rdoRascunho || {})[`novo:${d.obra}`]; },
@@ -796,7 +798,7 @@ export const acoesDiario = {
     const d = rdoDe(o, m.report_id); const a = ativ(o, m.activity_id) || ativ(o, m.phase_id);
     info(m.caption || m.name || 'Foto', `<img class="foto-ampliada" data-path="${esc(m.storage_path)}" alt="${esc(m.caption || m.name)}">
       <div class="small muted" style="margin-top:6px">${d ? `RDO nº ${d.numero} · ${periodoRdo(d)}` : ''}${a ? ` · ${esc(a.codigo)} ${esc(a.descricao)}` : ''} · ${esc(m.author_label || '')}${m.taken_on ? ` · ${isoBR(m.taken_on)}` : ''}</div>
-      ${d ? `<div style="margin-top:6px"><a href="#/diario/${o.id}/rdo/${d.id}" onclick="document.getElementById('dlg').close()">Abrir o relatório</a></div>` : ''}`);
+      ${d ? `<div style="margin-top:6px"><a href="${rota(`#/diario/${o.id}/rdo/${d.id}`)}" onclick="document.getElementById('dlg').close()">Abrir o relatório</a></div>` : ''}`);
     depoisDiario();
   },
   async rdoAnexo(dd) {

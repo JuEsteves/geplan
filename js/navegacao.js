@@ -33,7 +33,8 @@ export const MODULOS = {
   gantt: { rotulo: 'Cronograma', aba: 'gantt', texto: 'Gantt, caminho crítico, dependências e linha de base.' },
   curva: { rotulo: 'Curva S', aba: 'curva', texto: 'Curvas física e financeira, planejado × realizado.' },
   orcamento: { rotulo: 'Orçamentos', aba: 'orcamento', texto: 'Itens, composições, BDI, revisões e importação do Excel.' },
-  medicoes: { rotulo: 'Medições', aba: 'medicoes', texto: 'Avanço físico acumulado por atividade.' },
+  // no modo nuvem a aba Medições da obra abre nos boletins; o avanço físico é a sub-aba "avanco"
+  medicoes: { rotulo: 'Medições', aba: 'medicoes', secao: 'avanco', texto: 'Avanço físico acumulado por atividade.' },
   financeiro: { rotulo: 'Custos previstos e realizados', aba: 'financeiro', texto: 'Orçado, comprometido, incorrido e pago.' },
   diario: { rotulo: 'Diário de obra', aba: 'diario', texto: 'Registro diário: clima, equipe, serviços e ocorrências.' },
   painel: { rotulo: 'Acompanhamento físico', aba: 'painel', texto: 'Painel da obra: físico planejado × realizado, atrasos e prazos.' },
@@ -90,7 +91,7 @@ export function itemAtivo(route) {
   if (route.name === 'obra') {
     if (route.sub === 'compras') return 'mod-compras';
     const porAba = { orcamento: 'mod-orcamento', vinculos: 'mod-orcamento', atividades: 'mod-gantt', gantt: 'mod-gantt', curva: 'mod-curva',
-      medicoes: 'mod-medicoes', financeiro: 'mod-financeiro', diario: 'mod-diario', painel: 'mod-painel' };
+      medicoes: 'mod-medicoes', financeiro: 'mod-financeiro', diario: 'mod-diario', painel: 'mod-painel', compras: 'sup-quadro', entregas: 'sup-entregas' };
     return porAba[route.tab] || 'obras';
   }
   if (route.name === 'modulo') return `mod-${route.modulo}`;

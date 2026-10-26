@@ -6,7 +6,7 @@ import { uid, registrar, CATEGORIAS_CUSTO, TIPOS_OCORRENCIA } from './model.js';
 import { avanco, fracPlanejada, pctRealAte, incorridoAte } from './curvaS.js';
 import { resumoOrcamento, resumoCustos, custosPorFase, totalCompromisso, compromissoEfetivo, COMPROMISSO_ENCERRADO, pagoDespesa, despesaDuplicada, valorAgregado } from './financeiro.js';
 import { medicoesALancar } from './nuvem/aLancar.js';
-import { quantidadePlanejada, metodoMedicao, medicoesDe, registrarMedicao, removerMedicao, pendenciasAbertas, periodoRdo, badgeRdo } from './execucao.js';
+import { quantidadePlanejada, metodoMedicao, medicoesDe, registrarMedicao, removerMedicao, pendenciasAbertas } from './execucao.js';
 import { toDay, toISO, fmtBR, isoBR, todayDay, todayISO, fmtNum, fmtBRL } from './schedule.js';
 import { esc, I, ui, toast, ask, info, formDialog, commit, queueRender, parseNum, fmtIn } from './ui.js';
 import { contexto } from './obra.js';
@@ -180,23 +180,6 @@ async function dialogoMedir(o, c, a) {
     commit(o);
     toast(`${r.substituida ? 'Medição da data substituída' : 'Medição registrada'}: ${fmtNum(r.medicao.pct, 1)}%.${r.avisos.length ? ' ' + r.avisos.join(' ') : ''}`, r.avisos.length ? 7000 : 3500);
   } catch (e) { toast(e.message, 5000); }
-}
-
-/* =====================================================================
-   DIÁRIO DE OBRA — tem página própria (js/diario.js); aqui só o resumo e os atalhos
-   ===================================================================== */
-export function tabDiario(c) {
-  const { o } = c;
-  const lista = [...(o.diario || [])].sort((a, b) => b.data.localeCompare(a.data)).slice(0, 6);
-  return `<div class="stack">
-    <div class="card card-pad row between" style="flex-wrap:wrap;gap:10px"><div><h2 style="margin:0">Diário de obra (RDO)</h2>
-      <div class="muted small">Relatórios por período, fotos e vídeos, aprovação com assinatura e PDF ficam no painel do diário da obra.</div></div>
-      <div class="row"><a class="btn primary" href="#/diario/${o.id}/rdo/novo/editar">${I.plus} Novo relatório</a><a class="btn" href="#/diario/${o.id}">Abrir o diário da obra</a></div></div>
-    ${lista.length ? `<div class="card table-wrap"><table class="data tabela-clicavel"><thead><tr><th>Período</th><th>Nº</th><th>Situação</th><th>Responsável</th></tr></thead><tbody>
-      ${lista.map((d) => `<tr data-act="diarioAbrir" data-obra="${o.id}" data-id="${d.id}" tabindex="0"><td class="nowrap">${periodoRdo(d)}</td><td>${d.numero || '—'}</td><td>${badgeRdo(d.status)}</td><td class="small">${esc(d.responsavel || '')}</td></tr>`).join('')}
-    </tbody></table></div>` : vazioCard('Nenhum relatório no diário ainda.')}
-    <div class="muted small">O diário registra o dia a dia da obra. O avanço físico é lançado nas <a href="#/obra/${o.id}/medicoes">Medições</a> (registros relacionados, mas com finalidades distintas).</div>
-  </div>`;
 }
 
 /* =====================================================================
@@ -425,7 +408,6 @@ export const acoesGestao = {
     });
   },
   custosLimpar() { ui.custosAte = ''; ui.custosCat = ''; queueRender(); },
-  diarioAbrir(d) { location.hash = `#/diario/${d.obra}/rdo/${d.id}`; },
   compNovo(d) { const o = obraAtual(); dialogoCompromisso(o, contexto(o), { id: uid(), tipo: d.t, status: d.t === 'Contrato' ? 'Aprovado' : 'Em cotação', categoria: d.t === 'Contrato' ? 'Serviço terceirizado' : 'Material', aditivos: [] }, true); },
   compEditar(d) { const o = obraAtual(); dialogoCompromisso(o, contexto(o), o.compromissos.find((x) => x.id === d.id), false); },
   despNova() { const o = obraAtual(); dialogoDespesa(o, contexto(o), { id: uid(), categoria: 'Material', pagamentos: [] }, true); },

@@ -228,7 +228,7 @@ let ultimoHash = '';
 function parseRoute() {
   const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
   if (parts[0] === 'convite' && parts[1]) return { name: 'convite', token: parts[1] };
-  if (parts[0] === 'obra' && parts[1]) return { name: 'obra', id: parts[1], tab: parts[2] || 'painel', sub: parts[3] || '' };
+  if (parts[0] === 'obra' && parts[1]) return { name: 'obra', id: parts[1], tab: parts[2] || 'painel', sub: parts[3] || '', resto: parts.slice(3) };
   if (parts[0] === 'fases') return { name: 'fases', id: parts[1] };
   if (parts[0] === 'modulo' && parts[1]) return { name: 'modulo', modulo: parts[1] };
   if (parts[0] === 'fornecedores') return parts[1] ? { name: 'fornecedor', id: parts[1] } : { name: 'fornecedores' };
@@ -254,7 +254,9 @@ function render() {
   if (!authorized) return renderGate();
   document.body.classList.remove('locked');
   // formulário do RDO com alterações não salvas: a sincronização automática não redesenha por cima
-  if (route.name === 'diario' && route.modo === 'editar' && location.hash === ultimoHash && formRdoSujo()) { renderSync(); return; }
+  // (o diário também abre dentro da obra: #/obra/<id>/diario/rdo/<rdo>/editar)
+  const editandoRdo = (route.name === 'diario' && route.modo === 'editar') || (route.name === 'obra' && route.tab === 'diario' && route.resto[2] === 'editar');
+  if (editandoRdo && location.hash === ultimoHash && formRdoSujo()) { renderSync(); return; }
   const ae = document.activeElement;
   const focusKey = ui.pendingFocus || (ae && $view.contains(ae) ? ae.dataset.key : null);
   const sel = ae && ae.dataset?.key === focusKey && 'selectionStart' in ae ? (() => { try { return [ae.selectionStart, ae.selectionEnd]; } catch { return null; } })() : null;
@@ -305,7 +307,7 @@ function render() {
   if (tw && scrollTree) tw.scrollLeft = scrollTree;
   if (route.name === 'obra') depoisObra(route, scrollGantt);
   if (route.name === 'sinapi') depoisSinapi();
-  if (route.name === 'diario') depoisDiario();
+  if (route.name === 'diario' || (route.name === 'obra' && route.tab === 'diario')) depoisDiario();
 }
 setRenderer(render);
 

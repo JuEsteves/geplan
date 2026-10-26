@@ -107,6 +107,7 @@ export function viewObras() {
     const av = avanco(o, calc, cron, todayDay());
     return `<a class="card obra-card" href="#/obra/${o.id}/atividades">
       <h2>${esc(o.nome)}</h2>
+      ${o.eap.length ? '' : '<div><span class="badge warn">Sem EAP — clique para montar</span></div>'}
       <div class="meta">
         <div>Início<b>${fmtBR(cron.inicio)}</b></div>
         <div>Término previsto<b>${o.eap.length ? fmtBR(cron.termino) : '—'}</b></div>

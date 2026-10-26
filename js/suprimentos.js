@@ -10,6 +10,7 @@ import { configurado as nuvemConfigurada, sb, erroBanco } from './nuvem/supabase
 import * as nuvem from './nuvem/nuvem.js';
 import { enviarArquivo, urlTemporaria, ACCEPT, tamanhoLegivel, validarArquivo, TAMANHO_MAX_OBRA } from './nuvem/arquivos.js';
 import { liberado } from './permissoes.js';
+import { obraEmFoco, ir } from './escopo.js';
 import { datalistFornecedores, idDoFornecedorPorNome, carregarFornecedores, categoriasFornecedor } from './fornecedores.js';
 import {
   STATUS_GRUPO, STATUS_PEDIDO, COLUNAS, PASSAGENS_MANUAIS, OCORRENCIAS, etapaGrupo, numeroPedido, comparativoCotacoes,
@@ -124,7 +125,14 @@ export function viewSuprimentos(route) {
 }
 
 /* ----- Quadro ----- */
-function filtrosQuadro() { return ui.supF ||= { busca: '', obra: '', fase: '', prioridade: '', solicitante: '', comprador: '', fornecedor: '', de: '', ate: '', cancelados: false }; }
+// Dentro da página da obra, os filtros são da própria obra (a obra fica fixa); no menu geral, de todas as obras.
+function filtrosQuadro() {
+  const foco = obraEmFoco();
+  const novo = () => ({ busca: '', obra: foco, fase: '', prioridade: '', solicitante: '', comprador: '', fornecedor: '', de: '', ate: '', cancelados: false });
+  if (!foco) return ui.supF ||= novo();
+  const m = ui.supFObra ||= {};
+  return m[foco] ||= novo();
+}
 const fornecedoresDoPedido = (p) => gruposDe(p.id).map((g) => g.supplier_name).filter(Boolean);
 
 function viewQuadro() {
@@ -133,6 +141,7 @@ function viewQuadro() {
   const lista = filtrarPedidos(S.pedidos, f, { fornecedoresDoPedido });
   const opcoes = (vals, sel, todos) => `<option value="">${todos}</option>${[...new Set(vals.filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR')).map((v) => `<option ${v === sel ? 'selected' : ''}>${esc(v)}</option>`).join('')}`;
   const obras = store.obras();
+  const foco = obraEmFoco();
   const fases = f.obra ? fasesDaObra(store.obra(f.obra)) : [];
   const sel = (k, html, rot) => `<label class="field">${rot}<select data-chg="supFiltro" data-k="${k}">${html}</select></label>`;
   const colunas = COLUNAS.map((col) => {
@@ -142,13 +151,13 @@ function viewQuadro() {
       <div class="kanban-cards">${cards.map((p) => cartao(p, hoje)).join('') || '<div class="muted small kanban-vazio">Nenhum pedido.</div>'}</div></section>`;
   }).join('');
   const atrasados = lista.filter((p) => resumoPedido(p, gruposDe(p.id), hoje).atrasado).length;
-  return `<div class="page-head"><div><h1>Quadro de compras</h1><div class="muted">Pedidos de materiais por etapa. Um pedido reúne vários grupos; cada grupo segue o próprio caminho e o pedido só conclui quando todos terminam.</div></div>
+  return `<div class="page-head"><div><h1>Quadro de compras</h1><div class="muted">${foco ? 'Pedidos de materiais desta obra, por etapa.' : 'Pedidos de materiais de todas as obras, por etapa.'} Um pedido reúne vários grupos; cada grupo segue o próprio caminho e o pedido só conclui quando todos terminam.</div></div>
     <div class="row">${podeSolicitar() ? `<button class="btn primary" data-act="supNovo">${I.plus} Novo pedido</button>` : ''}<button class="btn" data-act="supAtualizar">Atualizar</button></div></div>
   <div class="stack">
     ${S.erro ? `<div class="alert err">${esc(S.erro)}</div>` : ''}
     <details class="card card-pad filtros-sup" ${Object.entries(f).some(([k, v]) => k !== 'busca' && v) ? 'open' : ''}><summary><input data-inp="supBusca" data-key="supBusca" value="${esc(f.busca)}" placeholder="Buscar por número (PED-0001) ou nome do pedido…" style="width:min(420px,100%)" onclick="event.stopPropagation()"> <span class="muted small">Filtros</span></summary>
       <div class="grid-form" style="margin-top:10px">
-        ${sel('obra', `<option value="">Todas as obras</option>${obras.map((o) => `<option value="${o.id}" ${o.id === f.obra ? 'selected' : ''}>${esc(o.nome)}</option>`).join('')}`, 'Obra')}
+        ${foco ? '' : sel('obra', `<option value="">Todas as obras</option>${obras.map((o) => `<option value="${o.id}" ${o.id === f.obra ? 'selected' : ''}>${esc(o.nome)}</option>`).join('')}`, 'Obra')}
         ${sel('fase', `<option value="">${f.obra ? 'Todas as fases' : 'Escolha a obra'}</option>${fases.map((a) => `<option value="${a.id}" ${a.id === f.fase ? 'selected' : ''}>${esc(a.codigo)} ${esc(a.descricao)}</option>`).join('')}`, 'Fase')}
         ${sel('solicitante', opcoes(S.pedidos.map((p) => p.requester_label), f.solicitante, 'Todos'), 'Solicitante')}
         ${sel('comprador', opcoes(S.pedidos.map((p) => p.buyer_label), f.comprador, 'Todos'), 'Comprador')}
@@ -161,7 +170,7 @@ function viewQuadro() {
       <div class="row" style="margin-top:8px"><button class="btn sm" data-act="supLimparFiltros">Limpar filtros</button></div>
     </details>
     <div class="muted small">${lista.length} pedido(s)${atrasados ? ` · <b style="color:var(--crit)">${atrasados} atrasado(s)</b>` : ''}. Cada cartão fica na coluna do grupo menos adiantado.</div>
-    ${S.pedidos.length ? `<div class="kanban">${colunas}</div>` : `<div class="card empty"><p>Nenhum pedido de compra registrado.</p>${podeSolicitar() ? `<button class="btn primary" data-act="supNovo">${I.plus} Fazer o primeiro</button>` : '<p class="muted small">Seu usuário não tem a liberação para solicitar materiais.</p>'}</div>`}
+    ${(foco ? S.pedidos.some((p) => p.project_id === foco) : S.pedidos.length) ? `<div class="kanban">${colunas}</div>` : `<div class="card empty"><p>Nenhum pedido de compra registrado${foco ? ' nesta obra' : ''}.</p>${podeSolicitar() ? `<button class="btn primary" data-act="supNovo">${I.plus} Fazer o primeiro</button>` : '<p class="muted small">Seu usuário não tem a liberação para solicitar materiais.</p>'}</div>`}
   </div>`;
 }
 
@@ -196,7 +205,7 @@ function viewPedido(id, aba) {
   const corpo = { resumo: abaResumo, grupos: abaGrupos, compras: abaCompras, entregas: abaEntregas, historico: abaHistorico }[aba] || abaResumo;
   return `<div class="page-head"><div>${voltar}<h1>${numeroPedido(p.number)} — ${esc(p.title)}</h1>
       <div class="row" style="gap:6px;flex-wrap:wrap">${bPedido(p.status)}${p.priority === 'urgente' ? '<span class="badge crit">Urgente</span>' : ''}${r.atrasado ? `<span class="badge crit">${I.alert} Atrasado</span>` : ''}</div>
-      <div class="muted small" style="margin-top:4px"><a href="#/obra/${p.project_id}/financeiro/compras">${esc(obraNome(p.project_id))}</a>${fase ? ` · Fase: ${esc(fase)}` : ''} · Solicitante: ${esc(p.requester_label || '—')} em ${new Date(p.created_at).toLocaleDateString('pt-BR')}${p.buyer_label ? ` · Comprador: ${esc(p.buyer_label)}` : ''}</div>
+      <div class="muted small" style="margin-top:4px"><a href="#/obra/${p.project_id}/compras">${esc(obraNome(p.project_id))}</a>${fase ? ` · Fase: ${esc(fase)}` : ''} · Solicitante: ${esc(p.requester_label || '—')} em ${new Date(p.created_at).toLocaleDateString('pt-BR')}${p.buyer_label ? ` · Comprador: ${esc(p.buyer_label)}` : ''}</div>
       ${gs.length ? `<div class="row" style="gap:8px;margin-top:6px;align-items:center"><div class="barra" style="width:180px"><span style="width:${r.pct}%"></span></div><span class="small">${r.encerrados} de ${r.total} grupo(s) concluído(s)</span></div>` : ''}</div>
     <div class="row">${editaPedido(p) ? `<button class="btn" data-act="supEditar" data-id="${p.id}">Editar pedido</button>` : ''}
       ${!['concluido', 'cancelado'].includes(p.status) && (podeComprar() || (meu(p) && podeSolicitar())) ? `<button class="btn" data-act="supNovoGrupo" data-id="${p.id}">${I.plus} Grupo</button>` : ''}
@@ -350,9 +359,10 @@ function abaHistorico(p) {
 function viewEntregas() {
   const hoje = todayISO();
   const linhas = [];
-  for (const p of S.pedidos) for (const g of gruposDe(p.id)) if (etapaGrupo(g.status) === 3) linhas.push({ p, g, atrasada: !!(g.expected_date && g.expected_date < hoje) });
+  const foco = obraEmFoco();
+  for (const p of S.pedidos) if (!foco || p.project_id === foco) for (const g of gruposDe(p.id)) if (etapaGrupo(g.status) === 3) linhas.push({ p, g, atrasada: !!(g.expected_date && g.expected_date < hoje) });
   linhas.sort((a, b) => Number(b.atrasada) - Number(a.atrasada) || String(a.g.expected_date || '9999').localeCompare(String(b.g.expected_date || '9999')));
-  return `<div class="page-head"><div><h1>Entregas e recebimentos</h1><div class="muted">Grupos comprados aguardando entrega ou retirada, de todos os pedidos. Atrasada = previsão anterior a hoje.</div></div>
+  return `<div class="page-head"><div><h1>Entregas e recebimentos</h1><div class="muted">Grupos comprados aguardando entrega ou retirada, ${foco ? 'dos pedidos desta obra' : 'de todos os pedidos'}. Atrasada = previsão anterior a hoje.</div></div>
     <div class="row"><button class="btn" data-act="supAtualizar">Atualizar</button></div></div>
   <div class="stack">${linhas.length ? `<div class="card table-wrap"><table class="data"><thead><tr><th>Pedido</th><th>Grupo</th><th>Obra</th><th>Fornecedor</th><th>Previsão</th><th>Etapa</th><th></th></tr></thead><tbody>
     ${linhas.map(({ p, g, atrasada }) => `<tr><td class="nowrap"><a href="#/suprimentos/pedido/${p.id}/entregas">${numeroPedido(p.number)}</a><div class="muted small">${esc(p.title)}</div></td><td><b>${esc(g.name)}</b></td>
@@ -422,6 +432,9 @@ const opcoesFase = (o, sel) => {
   return fs.length ? `<option value="">— escolha a fase —</option>${fs.map((a) => `<option value="${a.id}" ${a.id === sel ? 'selected' : ''}>${a.nivel > 1 ? '  ' : ''}${esc(a.codigo)} ${esc(a.descricao)}</option>`).join('')}`
     : '<option value="">(a obra ainda não tem EAP)</option>';
 };
+// Sem EAP não há fases para o pedido: avisa e leva à montagem da EAP da obra.
+const avisoEap = (o) => (o && !fasesDaObra(o).length
+  ? `<div class="alert warn small">A obra <b>${esc(o.nome)}</b> ainda não tem EAP — o pedido fica sem fase (e o custo não entra por etapa). <a href="#/obra/${o.id}/atividades" onclick="document.getElementById('dlg').close()">Montar a EAP da obra</a></div>` : '');
 
 async function formularioPedido(p = null) {
   await carregarFornecedores().catch(() => {});
@@ -437,12 +450,17 @@ async function formularioPedido(p = null) {
       <label class="field">Local de entrega<input name="delivery_location" value="${esc(p?.delivery_location || '')}" placeholder="ex.: canteiro, portão 2"></label>
       ${p && podeComprar() ? `<label class="field">Comprador responsável<input name="buyer_label" value="${esc(p.buyer_label || '')}"></label>` : ''}
     </div>
+    <div data-aviso-eap>${p ? '' : avisoEap(store.obra(obraIni))}</div>
     <label class="field">Observações<textarea name="notes" rows="2">${esc(p?.notes || '')}</textarea></label>
     ${p ? '' : `<div class="muted small">Solicitante: ${esc(ctx().email)}. Separe os materiais em grupos — cada grupo pode ser comprado de um fornecedor diferente.</div>
       <div class="grupos-form stack">${blocoGrupo()}</div><div><button type="button" class="btn sm" data-mais-grupo>${I.plus} Mais um grupo</button></div>${listaUnidades}`}`;
   const j = janela(p ? `Editar ${numeroPedido(p.number)}` : 'Novo pedido de compra', corpo, p ? 'Salvar' : 'Criar pedido');
   ligarItens(j.form);
-  j.form.project_id.onchange = () => { j.form.phase_id.innerHTML = opcoesFase(store.obra(j.form.project_id.value), ''); };
+  j.form.project_id.onchange = () => {
+    const o = store.obra(j.form.project_id.value);
+    j.form.phase_id.innerHTML = opcoesFase(o, '');
+    j.form.querySelector('[data-aviso-eap]').innerHTML = avisoEap(o);
+  };
   return abrir(j, async (v) => {
     if ((v.title || '').trim().length < 2) throw new Error('Informe a descrição do pedido.');
     const projeto = p?.project_id || v.project_id;
@@ -682,9 +700,9 @@ function formularioAnexo(p) {
 /* ---------- ações ---------- */
 const achar = (d) => { const p = pedidoPorId(d.id); const g = d.g ? gruposDe(d.id).find((x) => x.id === d.g) : null; return { p, g }; };
 export const acoesSuprimentos = {
-  async supNovo() { const p = await formularioPedido(); if (p) location.hash = `#/suprimentos/pedido/${p.id}/resumo`; },
-  supAbrir(d) { location.hash = `#/suprimentos/pedido/${d.id}/resumo`; },
-  supIrGrupo(d) { ui.supGrupoAberto = d.g; location.hash = `#/suprimentos/pedido/${d.id}/grupos`; },
+  async supNovo() { const p = await formularioPedido(); if (p) ir(`#/suprimentos/pedido/${p.id}/resumo`); },
+  supAbrir(d) { ir(`#/suprimentos/pedido/${d.id}/resumo`); },
+  supIrGrupo(d) { ui.supGrupoAberto = d.g; ir(`#/suprimentos/pedido/${d.id}/grupos`); },
   async supEditar(d) { await formularioPedido(pedidoPorId(d.id)); },
   async supNovoGrupo(d) { await formularioGrupo(pedidoPorId(d.id)); },
   async supEditarGrupo(d) { const { p, g } = achar(d); await formularioGrupo(p, g); },
@@ -753,7 +771,7 @@ export const acoesSuprimentos = {
     const w = window.open(url, '_blank', 'noopener');
     if (!w) info('Abrir anexo', `<p><a href="${esc(url)}" target="_blank" rel="noopener">Clique para abrir ${esc(d.nome)}</a> (link válido por 5 minutos).</p>`);
   },
-  supLimparFiltros() { ui.supF = null; queueRender(); },
+  supLimparFiltros() { const foco = obraEmFoco(); if (foco) delete (ui.supFObra || {})[foco]; else ui.supF = null; queueRender(); },
   async supAtualizar() { await carregarSuprimentos(true); },
 };
 export const mudancasSuprimentos = {

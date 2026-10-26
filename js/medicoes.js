@@ -10,6 +10,7 @@ import { configurado as nuvemConfigurada, sb, erroBanco } from './nuvem/supabase
 import * as nuvem from './nuvem/nuvem.js';
 import { invalidarALancar } from './nuvem/aLancar.js';
 import { pode, liberado } from './permissoes.js';
+import { obraEmFoco, ir } from './escopo.js';
 import { calcular } from './calculo.js';
 import { quantidadePlanejada, medicoesDe, idsDaFase } from './execucao.js';
 import { docValido, formatarDoc, tipoDoc, soDigitos, emailValido, normalizar } from './validacao.js';
@@ -92,17 +93,32 @@ export function viewMedicoes(route) {
   if (route.secao === 'profissional') return viewProfissional(route.id);
   const aba = ABAS.some(([k]) => k === route.secao) ? route.secao : 'boletins';
   const corpo = { boletins: viewBoletins, resumo: viewResumo, atividades: viewAtividades, profissionais: viewProfissionais }[aba]();
+  const foco = obraEmFoco();
   return `<div class="page-head"><div><h1>Medições</h1><div class="muted">Medição por atividade e por profissional: avanço físico e produção para pagamento, relacionados mas separados.</div></div>
     <div class="row">${aba === 'boletins' && podeMedir() ? `<button class="btn primary" data-act="medNovoBoletim">${I.plus} Novo boletim</button>` : ''}
     ${aba === 'profissionais' && podeCadastrar() ? `<button class="btn primary" data-act="medNovoProf">${I.plus} Novo profissional</button>` : ''}
-    <a class="btn" href="#/modulo/medicoes">Avanço físico por obra</a></div></div>
-  <nav class="row abas-sup">${ABAS.map(([k, r]) => `<a class="btn sm ${k === aba ? 'primary' : ''}" href="#/medicoes/${k}" ${k === aba ? 'aria-current="page"' : ''}>${r}</a>`).join('')}</nav>
+    ${foco ? '' : '<a class="btn" href="#/modulo/medicoes">Avanço físico por obra</a>'}</div></div>
+  ${navMedicoes(aba)}
   <div class="stack" style="margin-top:12px">${M.erro ? `<div class="alert err">${esc(M.erro)}</div>` : ''}${corpo}
   ${!veValores() ? '<div class="muted small">Seu perfil vê as quantidades medidas. Valores de mão de obra ficam com administrador, engenheiro e financeiro.</div>' : ''}</div>`;
 }
 
-const filtro = () => ui.medF ||= { obra: '', status: '', profissional: '', atividade: '', fase: '', de: '', ate: '' };
-const selObra = (f) => `<label class="field">Obra<select data-chg="medFiltro" data-k="obra"><option value="">Todas</option>${store.obras().map((o) => `<option value="${o.id}" ${o.id === f.obra ? 'selected' : ''}>${esc(o.nome)}</option>`).join('')}</select></label>`;
+/** Abas das medições. Dentro da obra, inclui o avanço físico da própria obra (aba "avanco"). */
+export function navMedicoes(aba) {
+  const foco = obraEmFoco();
+  const abas = foco ? [['avanco', 'Avanço físico'], ...ABAS] : ABAS;
+  return `<nav class="row abas-sup">${abas.map(([k, r]) => `<a class="btn sm ${k === aba ? 'primary' : ''}" href="${foco ? `#/obra/${foco}/medicoes/${k}` : `#/medicoes/${k}`}" ${k === aba ? 'aria-current="page"' : ''}>${r}</a>`).join('')}</nav>`;
+}
+
+// Dentro da página da obra, os filtros são da própria obra (a obra fica fixa); no menu geral, de todas as obras.
+const filtro = () => {
+  const foco = obraEmFoco();
+  const novo = () => ({ obra: foco, status: '', profissional: '', atividade: '', fase: '', de: '', ate: '' });
+  if (!foco) return ui.medF ||= novo();
+  const m = ui.medFObra ||= {};
+  return m[foco] ||= novo();
+};
+const selObra = (f) => obraEmFoco() ? '' : `<label class="field">Obra<select data-chg="medFiltro" data-k="obra"><option value="">Todas</option>${store.obras().map((o) => `<option value="${o.id}" ${o.id === f.obra ? 'selected' : ''}>${esc(o.nome)}</option>`).join('')}</select></label>`;
 const fasesDe = (o) => (o?.eap || []).filter((a) => a.nivel <= 2 && (o.eap || []).some((x) => x.parentId === a.id));
 
 function viewBoletins() {
@@ -234,7 +250,7 @@ function viewAtividades() {
     }
     porAtiv.set(i.activity_id, t);
   }
-  return `<div class="grid-form"><label class="field">Obra<select data-chg="medFiltro" data-k="obra">${store.obras().map((x) => `<option value="${x.id}" ${x.id === o.id ? 'selected' : ''}>${esc(x.nome)}</option>`).join('')}</select></label>
+  return `<div class="grid-form">${obraEmFoco() ? '' : `<label class="field">Obra<select data-chg="medFiltro" data-k="obra">${store.obras().map((x) => `<option value="${x.id}" ${x.id === o.id ? 'selected' : ''}>${esc(x.nome)}</option>`).join('')}</select></label>`}
       <label class="field">Fase<select data-chg="medFiltro" data-k="fase"><option value="">Todas</option>${fasesDe(o).map((a) => `<option value="${a.id}" ${a.id === f.fase ? 'selected' : ''}>${esc(a.codigo)} ${esc(a.descricao)}</option>`).join('')}</select></label></div>
     ${porAtiv.size ? `<div class="card table-wrap"><table class="data"><thead><tr><th>Atividade</th><th class="num">Prevista</th><th class="num">Executado (boletins)</th><th class="num">Aprovado</th><th class="num">Avanço físico</th><th>Por profissional</th>${veValores() ? '<th class="num">Valor aprovado</th>' : ''}</tr></thead><tbody>
       ${[...porAtiv.entries()].map(([aid, t]) => { const a = ativ(o.id, aid);
@@ -349,7 +365,7 @@ async function formBoletim() {
   const obras = store.obras();
   let ultima = ''; try { ultima = localStorage.getItem('planobras:ultimaObra') || ''; } catch {}
   const v = await formDialog({ title: 'Novo boletim de medição', ok: 'Criar', fields: [
-    { name: 'obra', label: 'Obra *', type: 'select', value: obras.some((o) => o.id === ultima) ? ultima : obras[0]?.id, options: obras.map((o) => ({ value: o.id, label: o.nome })) },
+    { name: 'obra', label: 'Obra *', type: 'select', value: obraEmFoco() || (obras.some((o) => o.id === ultima) ? ultima : obras[0]?.id), options: obras.map((o) => ({ value: o.id, label: o.nome })) },
     { name: 'de', label: 'Período — início *', type: 'date', required: true },
     { name: 'ate', label: 'Período — fim *', type: 'date', required: true, value: todayISO() },
     { name: 'notes', label: 'Observações', type: 'textarea' },
@@ -411,12 +427,12 @@ async function formLinha(b, it) {
 /* ---------- ações ---------- */
 const boletim = (id) => M.boletins.find((b) => b.id === id);
 export const acoesMedicoes = {
-  async medNovoBoletim() { const b = await formBoletim(); if (b) location.hash = `#/medicoes/boletim/${b.id}`; },
-  medAbrir(d) { location.hash = `#/medicoes/boletim/${d.id}`; },
+  async medNovoBoletim() { const b = await formBoletim(); if (b) ir(`#/medicoes/boletim/${b.id}`); },
+  medAbrir(d) { ir(`#/medicoes/boletim/${d.id}`); },
   async medExcluir(d) {
     if (!(await ask('Excluir este boletim em rascunho? (Fica registrado na auditoria.)', 'Excluir'))) return;
     ok(await (await sb()).from('measurement_sheets').update({ deleted_at: new Date().toISOString() }).eq('id', d.id), 'boletim');
-    await carregarMedicoes(true); location.hash = '#/medicoes/boletins';
+    await carregarMedicoes(true); ir('#/medicoes/boletins');
   },
   async medAddItem(d) { await formItem(boletim(d.id)); },
   async medRemItem(d) {
@@ -453,8 +469,8 @@ export const acoesMedicoes = {
     const n = ok(await (await sb()).rpc('medicao_lancar_despesas', { p_sheet: d.id, p_due: v.venc || null }), 'Financeiro');
     await depois(d.id, { obras: true }); toast(`${n} despesa(s) lançada(s) no Financeiro.`);
   },
-  async medNovoProf() { const w = await formProfissional(); if (w) location.hash = `#/medicoes/profissional/${w.id}`; },
-  medAbrirProf(d) { location.hash = `#/medicoes/profissional/${d.id}`; },
+  async medNovoProf() { const w = await formProfissional(); if (w) ir(`#/medicoes/profissional/${w.id}`); },
+  medAbrirProf(d) { ir(`#/medicoes/profissional/${d.id}`); },
   async medEditarProf(d) { await formProfissional(prof(d.id)); },
   async medStatusProf(d) {
     const w = prof(d.id);

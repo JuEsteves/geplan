@@ -1,5 +1,18 @@
 # Histórico de versões do GEPLAN
 
+## Bases de referência e SINAPI automático — Etapa C (out/2026)
+- Composições › **Bases de referência**: SINAPI no banco (todas as UF, desonerado e não desonerado), pesquisa, custo
+  na UF/regime escolhidos (padrão da empresa), analítico com preços, comparação entre estados e entre meses, e
+  "Adicionar à biblioteca" (cópia Própria; a base nunca muda). Ver `docs/BASES.md`.
+- Robô mensal (GitHub Actions) que importa o SINAPI novo da Caixa sozinho; importação manual pela tela como reserva.
+- Migração `0014` (tabelas de referência, permissões, padrão de UF/regime da empresa). Testes: +4 unitários, +7 de banco.
+
+## Painel de pedidos por obra — Etapa B (out/2026)
+- "Entregas e recebimentos" virou painel de acompanhamento: totais (pedidos em aberto, grupos em compra, aguardando
+  entrega, atrasados, entregas registradas), um cartão por obra (as com atraso primeiro; clique abre a obra), lista do
+  que aguarda entrega/retirada com filtro por obra e situação (atrasadas, aguardando, retirada, parcial) e as entregas
+  recebidas recentemente. Dentro da obra, o mesmo painel só com a obra. Regra em `painelPorObra` (+1 teste).
+
 ## Tudo dentro da obra — Etapa A (out/2026)
 - A página da obra reúne todos os módulos, na ordem do trabalho: Painel, EAP, Orçamento, Vínculos, Cronograma,
   Físico-financeiro, Medições, Diário de obra, Compras, Entregas, Custos e Cadastro. Compras, entregas, medições

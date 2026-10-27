@@ -21,6 +21,7 @@ import { viewSuprimentos, acoesSuprimentos, mudancasSuprimentos, entradasSuprime
 import { liberacoesDe } from './liberacoes.js';
 import { viewDiario, acoesDiario, mudancasDiario, entradasDiario, depoisDiario, limparDiario, formRdoSujo } from './diario.js';
 import { viewMedicoes, acoesMedicoes, mudancasMedicoes, entradasMedicoes, limparMedicoes } from './medicoes.js';
+import { viewBases, acoesBases, mudancasBases, entradasBases, limparBases } from './basesRef.js';
 
 // Modo nuvem (Supabase) quando js/config.js tiver URL e chave; senão, modo Google Drive (como antes).
 const NUVEM = nuvemConfigurada();
@@ -208,7 +209,7 @@ async function sairNuvem() {
   if (nuvem.pendente()) await nuvem.enviar().catch(() => {});
   if (nuvem.pendente() && !(await ask('Há alterações que ainda NÃO foram enviadas para a nuvem e serão perdidas. Sair mesmo assim?', 'Sair'))) return;
   await conta.sair().catch(() => {});
-  nuvem.encerrar(); store.clearLocal(); limparEmpresa(); limparFornecedores(); limparSuprimentos(); limparDiario(); limparMedicoes();
+  nuvem.encerrar(); store.clearLocal(); limparEmpresa(); limparFornecedores(); limparSuprimentos(); limparDiario(); limparMedicoes(); limparBases();
   sessaoAtual = null; authorized = false;
   location.hash = '#/inicio';
   renderGateNuvem('entrar');
@@ -218,7 +219,7 @@ window.addEventListener('geplan:aviso', (e) => toast(e.detail, 7000));
 window.addEventListener('geplan:trocar-empresa', async (e) => {
   await nuvem.enviar().catch(() => {});
   if (nuvem.pendente() && !(await ask('Há alterações não enviadas nesta empresa. Trocar mesmo assim (elas serão perdidas)?', 'Trocar'))) return queueRender();
-  nuvem.encerrar(); store.clearLocal(); limparFornecedores(); limparSuprimentos(); limparDiario(); limparMedicoes();
+  nuvem.encerrar(); store.clearLocal(); limparFornecedores(); limparSuprimentos(); limparDiario(); limparMedicoes(); limparBases();
   location.hash = '#/inicio';
   await entrarNaEmpresa(e.detail);
 });
@@ -231,6 +232,7 @@ function parseRoute() {
   if (parts[0] === 'obra' && parts[1]) return { name: 'obra', id: parts[1], tab: parts[2] || 'painel', sub: parts[3] || '', resto: parts.slice(3) };
   if (parts[0] === 'fases') return { name: 'fases', id: parts[1] };
   if (parts[0] === 'modulo' && parts[1]) return { name: 'modulo', modulo: parts[1] };
+  if (parts[0] === 'bases') return { name: 'bases', base: parts[1] || '', codigo: parts[2] || '' };
   if (parts[0] === 'fornecedores') return parts[1] ? { name: 'fornecedor', id: parts[1] } : { name: 'fornecedores' };
   if (parts[0] === 'medicoes') return { name: 'medicoes', secao: parts[1] || 'boletins', id: parts[2] || '' };
   if (parts[0] === 'diario') return { name: 'diario', obra: parts[1] || '', secao: parts[2] || 'geral', id: parts[3] || '', modo: parts[4] || '' };
@@ -285,6 +287,7 @@ function render() {
   else if (route.name === 'obra') html = viewObra(route);
   else if (route.name === 'composicoes') html = viewComposicoes();
   else if (route.name === 'sinapi') html = viewSinapi();
+  else if (route.name === 'bases') html = viewBases(route);
   else if (route.name === 'fases') html = viewFases(route);
   else if (route.name === 'importar') html = viewImportar();
   else if (route.name === 'drive') html = NUVEM ? viewEmpresa() : viewDrive();
@@ -397,9 +400,9 @@ const mudancasGerais = {
 };
 
 /* ---------- eventos ---------- */
-const acoes = { ...acoesGerais, ...acoesBiblioteca, ...acoesObra, ...acoesFases, ...acoesSinapi, ...acoesGestao, ...acoesEmpresa, ...acoesFornecedores, ...acoesSuprimentos, ...acoesDiario, ...acoesMedicoes };
-const mudancas = { ...mudancasGerais, ...mudancasBiblioteca, ...mudancasObra, ...mudancasFases, ...mudancasSinapi, ...mudancasGestao, ...mudancasEmpresa, ...mudancasInicio, ...mudancasFornecedores, ...mudancasSuprimentos, ...mudancasDiario, ...mudancasMedicoes };
-const entradas = { ...entradasBiblioteca, ...entradasObra, ...entradasFases, ...entradasSinapi, ...entradasInicio, ...entradasFornecedores, ...entradasSuprimentos, ...entradasDiario, ...entradasMedicoes };
+const acoes = { ...acoesGerais, ...acoesBiblioteca, ...acoesObra, ...acoesFases, ...acoesSinapi, ...acoesGestao, ...acoesEmpresa, ...acoesFornecedores, ...acoesSuprimentos, ...acoesDiario, ...acoesMedicoes, ...acoesBases };
+const mudancas = { ...mudancasGerais, ...mudancasBiblioteca, ...mudancasObra, ...mudancasFases, ...mudancasSinapi, ...mudancasGestao, ...mudancasEmpresa, ...mudancasInicio, ...mudancasFornecedores, ...mudancasSuprimentos, ...mudancasDiario, ...mudancasMedicoes, ...mudancasBases };
+const entradas = { ...entradasBiblioteca, ...entradasObra, ...entradasFases, ...entradasSinapi, ...entradasInicio, ...entradasFornecedores, ...entradasSuprimentos, ...entradasDiario, ...entradasMedicoes, ...entradasBases };
 
 $view.addEventListener('click', (e) => {
   const el = e.target.closest('[data-act]');

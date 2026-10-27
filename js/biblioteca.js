@@ -179,7 +179,7 @@ export function viewComposicoes() {
   }).join('');
   return `<div class="page-head"><div><h1>Composições</h1><div class="muted">Coeficientes de mão de obra por função (h/unidade). A função líder define a duração. Tudo editável.</div></div>
     <div class="row"><label class="btn">${I.upload} Importar da planilha<input type="file" accept=".xlsx,.xls" data-chg="compImportar" hidden></label><button class="btn primary" data-act="compNova">${I.plus} Composição própria</button></div></div>
-    <div class="tabs"><a href="#/composicoes" class="active">Minha biblioteca (${lib.composicoes.length})</a><a href="#/sinapi">Base SINAPI</a></div>
+    <div class="tabs"><a href="#/composicoes" class="active">Minha biblioteca (${lib.composicoes.length})</a>${nuvemCtx.ativo() ? '<a href="#/bases">Bases de referência</a>' : '<a href="#/sinapi">Base SINAPI</a>'}</div>
     <div class="stack">
       <input data-inp="compFilter" data-key="compFilter" value="${esc(ui.compFilter)}" placeholder="Buscar por código, descrição, etapa, fonte ou ref. SINAPI…">
       <div class="muted small">${lib.composicoes.length} composições. Prioridade de uso: Própria (validada por RDO) › SINAPI › SINAPI (família) › Própria (sugerida). Coeficientes SINAPI: registre mês de referência, UF e regime na observação.</div>

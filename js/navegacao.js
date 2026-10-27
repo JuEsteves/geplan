@@ -96,7 +96,7 @@ export function itemAtivo(route) {
   }
   if (route.name === 'modulo') return `mod-${route.modulo}`;
   if (route.name === 'importar') return 'obras';
-  if (route.name === 'sinapi') return 'composicoes';
+  if (route.name === 'sinapi' || route.name === 'bases') return 'composicoes';
   if (route.name === 'fornecedor') return 'fornecedores';
   if (route.name === 'suprimentos') return route.secao === 'entregas' ? 'sup-entregas' : 'sup-quadro';
   if (route.name === 'diario') return 'mod-diario';

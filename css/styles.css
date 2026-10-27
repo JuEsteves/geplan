@@ -647,3 +647,6 @@ fieldset { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12p
 .kpi-alerta .k-value { color: var(--crit); }
 .warn-ink { color: var(--warn); }
 .painel-obra { gap: 4px; }
+
+/* Bases de referência: linha da UF/base escolhida */
+.linha-destaque td { background: color-mix(in srgb, var(--accent) 10%, transparent); }

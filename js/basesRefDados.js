@@ -166,6 +166,82 @@ export function interpretarReferenciaSinapi(wb, XLSX) {
   return { mes, regimes: [...regimes], ufs: UFS.filter((u) => ufs.has(u)), composicoes, itens, insumos: [...insumos.values()], contagem, avisos };
 }
 
+/* ---------- bases da empresa (TCPO, bases estaduais, planilha própria): qualquer planilha, colunas associadas ---------- */
+export const CAMPOS_BASE = [
+  ['codigo', 'Código da composição', true], ['descricao', 'Descrição da composição', true], ['unidade', 'Unidade'], ['custo', 'Custo unitário (R$)'],
+  ['grupo', 'Grupo / capítulo'], ['itemCodigo', 'Código do item (insumo)'], ['itemDescricao', 'Descrição do item'], ['itemUnidade', 'Unidade do item'],
+  ['coeficiente', 'Coeficiente / consumo do item'], ['tipo', 'Tipo do item (insumo/composição)'],
+];
+// ordem de sugestão: primeiro as colunas de item (mais específicas), depois as da composição
+const PADROES = [
+  ['itemCodigo', /cod.*(insumo|item)/], ['itemDescricao', /desc.*(insumo|item)/], ['itemUnidade', /(unid|^un).*(insumo|item)/],
+  ['coeficiente', /coef|consumo|indice|^quant/], ['tipo', /^tipo/], ['codigo', /cod|^compos/], ['descricao', /^desc|descri|servico|^nome/],
+  ['unidade', /^unid|^un\b|^un\.?$/], ['custo', /custo|preco|valor/], ['grupo', /grupo|classe|capitulo|familia|etapa/],
+];
+
+/** Linha de cabeçalho: a primeira (até a 30ª) com 3 ou mais textos, entre eles um de código ou descrição. */
+export function acharCabecalhoBase(linhas) {
+  return linhas.slice(0, 30).findIndex((r) => {
+    const h = r.map((c) => normBusca(c)).filter((x) => x && !/^[\d.,]+$/.test(x));
+    return h.length >= 3 && h.some((x) => /cod|descri/.test(x));
+  });
+}
+
+/** Sugere a coluna de cada campo pelo nome do cabeçalho (cada coluna usada uma vez). Retorna { campo: índice | -1 }. */
+export function sugerirColunas(cabecalho) {
+  const h = cabecalho.map((c) => normBusca(c));
+  const usadas = new Set();
+  const mapa = Object.fromEntries(CAMPOS_BASE.map(([k]) => [k, -1]));
+  for (const [k, re] of PADROES) {
+    const j = h.findIndex((x, i) => x && !usadas.has(i) && re.test(x));
+    if (j >= 0) { mapa[k] = j; usadas.add(j); }
+  }
+  return mapa;
+}
+
+/**
+ * Lê uma base da empresa com as colunas associadas. Aceita: uma linha por composição (com custo) ou o analítico
+ * (linhas de item com coeficiente, abaixo da linha da composição ou repetindo o código dela). O custo vale para a UF e o
+ * regime informados. Retorna o mesmo formato do SINAPI ({ composicoes, itens, insumos, ufs, regimes, avisos }).
+ */
+export function interpretarBaseEmpresa(linhas, iCab, mapa, { uf, regime = 'nao_desonerado', mes = '' }) {
+  const v = (r, k) => (mapa[k] >= 0 ? r[mapa[k]] : '');
+  const comps = new Map(), itens = [], pos = new Map();
+  const comItens = mapa.coeficiente >= 0 && (mapa.itemCodigo >= 0 || mapa.itemDescricao >= 0);
+  let atual = null;
+  for (const r of linhas.slice(iCab + 1)) {
+    const temItem = comItens && !!txt(v(r, mapa.itemCodigo >= 0 ? 'itemCodigo' : 'itemDescricao')) && numeroPlanilha(v(r, 'coeficiente')) != null;
+    const cod = txt(v(r, 'codigo')) || (temItem ? atual : '');
+    if (!cod) continue;
+    if (!comps.has(cod)) comps.set(cod, { codigo: cod, grupo: '', descricao: '', unidade: '', situacao: '', custos: {} });
+    const c = comps.get(cod);
+    atual = cod;
+    // colunas da composição que não são as mesmas do item (layout com a composição repetida em cada linha)
+    const propria = (k, ki) => !temItem || mapa[k] !== mapa[ki];
+    if (propria('descricao', 'itemDescricao')) c.descricao ||= txt(v(r, 'descricao'));
+    if (propria('unidade', 'itemUnidade')) c.unidade ||= txt(v(r, 'unidade'));
+    c.grupo ||= txt(v(r, 'grupo'));
+    const custo = valorPublicado(v(r, 'custo'));
+    if (custo != null && !temItem) c.custos[regime] = { [uf]: custo };
+    if (temItem) {
+      const p = (pos.get(cod) || 0) + 1; pos.set(cod, p);
+      itens.push({ composicao: cod, posicao: p, tipo: /comp/.test(normBusca(v(r, 'tipo'))) ? 'C' : 'I', codigo: txt(v(r, 'itemCodigo')),
+        descricao: txt(v(r, 'itemDescricao')), unidade: txt(v(r, 'itemUnidade')), coeficiente: numeroPlanilha(v(r, 'coeficiente')) ?? 0, situacao: '' });
+    }
+  }
+  const composicoes = [...comps.values()].filter((c) => c.descricao).map((c) => ({ ...c, busca: normBusca(`${c.codigo} ${c.descricao}`) }));
+  const validos = new Set(composicoes.map((c) => c.codigo));
+  const avisos = [];
+  if (mapa.codigo < 0 || mapa.descricao < 0) avisos.push('Associe as colunas de código e de descrição da composição.');
+  else if (!composicoes.length) avisos.push('Nenhuma composição com código e descrição foi encontrada abaixo do cabeçalho.');
+  const temCusto = composicoes.some((c) => Object.keys(c.custos).length);
+  return { mes, regimes: temCusto ? [regime] : [], ufs: temCusto ? [uf] : [], composicoes, itens: itens.filter((i) => validos.has(i.composicao)), insumos: [], avisos };
+}
+
+/** Custo de uma composição para a tela: base de uma UF só (da empresa) usa o próprio preço; o SINAPI, a UF/regime escolhidos. */
+export const custoNaBase = (comp, base, uf, regime) => (base?.org_id && (base.ufs || []).length === 1
+  ? custoEm(comp, base.ufs[0], (base.regimes || [])[0] || regime) : custoEm(comp, uf, regime));
+
 /** Nome da versão: "SINAPI 09/2026" (+ " · retificação 01" quando o arquivo é uma retificação). */
 export function nomeVersao(fonte, mes, arquivo = '') {
   const m = /^(\d{4})-(\d{2})/.exec(mes || '');

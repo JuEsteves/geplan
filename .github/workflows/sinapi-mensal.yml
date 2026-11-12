@@ -1,0 +1,50 @@
+# Robô do SINAPI: todo dia confere no site da Caixa se saiu um mês novo (ou retificação) e, se saiu, importa para o
+# banco como base pública (tools/sinapi/robo.mjs). Roda para cada ambiente que tiver os segredos configurados:
+#   SUPABASE_URL_TESTE / SUPABASE_SERVICE_ROLE_KEY_TESTE       → projeto GEPLAN-testes
+#   SUPABASE_URL_PRODUCAO / SUPABASE_SERVICE_ROLE_KEY_PRODUCAO → projeto GEPLAN (produção)
+# Sem os segredos de um ambiente, ele é pulado. Para importar um mês antigo: Actions › SINAPI mensal › Run workflow.
+name: SINAPI mensal
+
+on:
+  schedule:
+    - cron: '0 12 * * *'        # todo dia às 09:00 (Brasília)
+  workflow_dispatch:
+    inputs:
+      mes:
+        description: 'Mês a importar (AAAA-MM). Vazio = o mais recente publicado pela Caixa.'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sinapi-mensal
+  cancel-in-progress: false
+
+jobs:
+  importar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        ambiente: [TESTE, PRODUCAO]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Dependências do robô
+        working-directory: tools/sinapi
+        run: |
+          npm init -y > /dev/null
+          npm install --no-audit --no-fund @supabase/supabase-js@2.45.4 xlsx@0.18.5
+          cp ../../js/basesRefDados.js basesRefDados.mjs
+      - name: Importar SINAPI (${{ matrix.ambiente }})
+        working-directory: tools/sinapi
+        env:
+          SUPABASE_URL: ${{ secrets[format('SUPABASE_URL_{0}', matrix.ambiente)] }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets[format('SUPABASE_SERVICE_ROLE_KEY_{0}', matrix.ambiente)] }}
+          MES: ${{ github.event.inputs.mes }}
+        run: node robo.mjs

@@ -1,5 +1,5 @@
 // Service worker: deixa o site abrir sem internet (os dados ficam no aparelho e sobem ao Drive depois).
-const CACHE = 'geplan-v21';
+const CACHE = 'geplan-v22';
 const SHELL = [
   './', './index.html', './css/styles.css', './manifest.webmanifest',
   './js/app.js', './js/store.js', './js/schedule.js', './js/drive.js', './js/export.js', './js/config.js',

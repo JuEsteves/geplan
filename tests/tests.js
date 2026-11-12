@@ -11,7 +11,7 @@ import { interpretar, criarObraImportada, etapasDoModelo, selecaoPadrao, instanc
 import { moverNo, subarvore } from '../js/model.js';
 import { etapasParaIA, selecaoDaSugestao, aplicarSugestao } from '../js/leituraProjeto.js';
 import { criarObraExemplo } from '../js/obraExemplo.js';
-import { interpretarReferenciaSinapi, custoEm, maoDeObraItens, nomeVersao, variacao } from '../js/basesRefDados.js';
+import { interpretarReferenciaSinapi, custoEm, maoDeObraItens, nomeVersao, variacao, acharCabecalhoBase, sugerirColunas, interpretarBaseEmpresa, custoNaBase } from '../js/basesRefDados.js';
 import { interpretarSinapi, maoDeObra, adicionarDaSinapi } from '../js/sinapi.js';
 import { LIBS, loadScript } from '../js/libs.js';
 import { sugerirMapeamento, validarLinhas, aplicarImportacao } from '../js/orcImport.js';
@@ -1035,7 +1035,43 @@ async function testeBasesRef() {
   });
 }
 
-testeImportacao().then(testeSinapi).then(testeBasesRef).finally(() => {
+/* ---------- 23. Bases da empresa (TCPO, estaduais, própria): colunas associadas ---------- */
+function testeBasesEmpresa() {
+  grupo('23. Bases da empresa — cabeçalho, sugestão de colunas e três formatos de planilha');
+  teste('Lista simples (uma linha por composição): cabeçalho achado abaixo do título, colunas sugeridas, custo na UF/regime', () => {
+    const linhas = [['TABELA DE COMPOSIÇÕES - CONSTRUTORA X'], [], ['Código', 'Descrição do serviço', 'Unid.', 'Preço unitário (R$)', 'Capítulo'],
+      ['01.001', 'Alvenaria de bloco cerâmico 14 cm', 'm²', '85,40', 'Alvenaria'], ['01.002', 'Chapisco', 'm²', 6.2, 'Revestimento'], ['', '', '', '', ''], ['TOTAL', '', '', '', '']];
+    const i = acharCabecalhoBase(linhas); igual(i, 2);
+    const m = sugerirColunas(linhas[i]);
+    igual(`${m.codigo},${m.descricao},${m.unidade},${m.custo},${m.grupo},${m.coeficiente}`, '0,1,2,3,4,-1');
+    const d = interpretarBaseEmpresa(linhas, i, m, { uf: 'MG', regime: 'nao_desonerado' });
+    igual(d.composicoes.length, 2, 'linha TOTAL sem descrição fica fora:'); igual(d.avisos.length, 0);
+    igual(custoEm(d.composicoes[0], 'MG', 'nao_desonerado'), 85.4); igual(d.ufs.join(), 'MG'); igual(d.itens.length, 0);
+    const base = { org_id: 'x', ufs: ['MG'], regimes: ['nao_desonerado'] };
+    igual(custoNaBase(d.composicoes[1], base, 'SP', 'desonerado'), 6.2, 'base da empresa usa o próprio preço:');
+  });
+  teste('Analítico com linha da composição e itens abaixo (código em branco nas linhas de item)', () => {
+    const linhas = [['Composição', 'Descrição', 'Un', 'Cód. insumo', 'Descrição do insumo', 'Un. insumo', 'Consumo'],
+      ['T-100', 'Reboco massa única', 'm²', '', '', '', ''], ['', '', '', 'I-1', 'Pedreiro', 'h', '0,70'], ['', '', '', 'I-2', 'Servente', 'h', 0.55], ['', '', '', 'I-3', 'Argamassa', 'm³', 0.024],
+      ['T-200', 'Contrapiso 4 cm', 'm²', '', '', '', ''], ['', '', '', 'I-1', 'Pedreiro', 'h', 0.35]];
+    const m = sugerirColunas(linhas[0]);
+    igual(`${m.codigo},${m.descricao},${m.unidade},${m.itemCodigo},${m.itemDescricao},${m.itemUnidade},${m.coeficiente}`, '0,1,2,3,4,5,6');
+    const d = interpretarBaseEmpresa(linhas, 0, m, { uf: 'SP' });
+    igual(d.composicoes.map((c) => `${c.codigo}:${c.descricao}`).join('|'), 'T-100:Reboco massa única|T-200:Contrapiso 4 cm');
+    igual(d.itens.filter((x) => x.composicao === 'T-100').length, 3); igual(d.ufs.length, 0, 'sem custo:');
+    igual(maoDeObraItens(d.itens.filter((x) => x.composicao === 'T-100')).map((f) => `${f.funcao}:${f.coef}${f.lider ? '*' : ''}`).join(' '), 'Pedreiro:0.7* Servente:0.55');
+  });
+  teste('Código e descrição da composição repetidos em cada linha de item; falta de colunas obrigatórias avisa', () => {
+    const linhas = [['Cod Comp', 'Desc Comp', 'Unidade', 'Cod Item', 'Desc Item', 'Coeficiente'],
+      ['C1', 'Pintura látex', 'm²', 'P', 'Pintor', 0.25], ['C1', 'Pintura látex', 'm²', 'A', 'Ajudante', 0.05]];
+    const m = sugerirColunas(linhas[0]);
+    const d = interpretarBaseEmpresa(linhas, 0, m, { uf: 'RJ' });
+    igual(d.composicoes.length, 1); igual(d.composicoes[0].descricao, 'Pintura látex'); igual(d.itens.length, 2);
+    igual(interpretarBaseEmpresa(linhas, 0, { ...m, codigo: -1 }, { uf: 'RJ' }).avisos.length, 1);
+  });
+}
+
+testeImportacao().then(testeSinapi).then(testeBasesRef).then(testeBasesEmpresa).finally(() => {
   const r = document.getElementById('resumo');
   r.className = fail ? 'err' : 'ok';
   r.textContent = `${ok} passaram · ${fail} falharam${skip ? ` · ${skip} pulados` : ''}`;

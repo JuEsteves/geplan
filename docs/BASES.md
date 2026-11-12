@@ -33,6 +33,19 @@ coeficientes mudaram) e **Adicionar à biblioteca**.
 3. Primeira execução: *Actions › SINAPI mensal › Run workflow* (vazio = mês mais recente; ou `AAAA-MM`).
 O agendamento do GitHub só funciona com o arquivo do robô no ramo principal (`main`).
 
+## Bases da empresa (TCPO, bases estaduais, planilha própria)
+- **Bases de referência › Bases da empresa › Importar planilha** (administrador ou engenheiro). Aceita .xlsx, .xls e .csv.
+- O GEPLAN acha a linha de cabeçalho e **sugere as colunas** (código, descrição, unidade, custo, grupo e, se houver, os
+  itens: código, descrição, unidade e coeficiente/consumo). A pessoa confere, informa a fonte, o nome da versão e a
+  **UF e o regime dos preços**, vê um resumo (quantas composições, com custo, itens e exemplos) e confirma.
+- Formatos aceitos: uma linha por composição (com custo); analítico com a linha da composição e os itens abaixo; ou com o
+  código da composição repetido em cada linha de item.
+- Só a própria empresa vê. Pode ser retirada pela mesma tela. Licença: bases pagas (ex.: TCPO) são importadas por quem
+  tem a assinatura, para uso da própria empresa.
+- **Comparar com outra composição** (na página de detalhes): escolhe outra base, pesquisa a composição equivalente (os
+  códigos mudam entre SINAPI, TCPO e bases próprias) e vê lado a lado custo, variação, horas de mão de obra e funções;
+  avisa quando as unidades são diferentes.
+
 ## Espaço no banco
 Cada mês do SINAPI ocupa algo como 30 a 45 MB (≈ 10,6 mil composições, 57 mil itens e 4,9 mil insumos, com as 27 UF e
 os dois regimes). O plano gratuito do Supabase tem 500 MB: cabem poucos meses junto com os dados das obras. No plano Pro
@@ -40,7 +53,7 @@ os dois regimes). O plano gratuito do Supabase tem 500 MB: cabem poucos meses ju
 
 ## Segurança (migração `0014_bases_referencia`)
 - Base pública (SINAPI): todos os usuários leem; só o robô (chave de serviço) ou o administrador da plataforma gravam.
-- Base da empresa (próxima etapa, C3: TCPO, bases estaduais, planilha própria): só a empresa lê; admin/engenheiro gravam.
+- Base da empresa (TCPO, bases estaduais, planilha própria): só a empresa lê; admin/engenheiro gravam.
 - Enquanto importa, a versão fica invisível para as empresas; publicada, não muda mais (nem itens novos).
 - Padrão de UF/regime da empresa: só o administrador define.
 - Testes: `tests/index.html` grupo 22 (leitor) e `tests/db.html` grupo 18 (permissões, robô).

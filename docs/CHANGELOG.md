@@ -6,6 +6,8 @@
   "Adicionar à biblioteca" (cópia Própria; a base nunca muda). Ver `docs/BASES.md`.
 - Robô mensal (GitHub Actions) que importa o SINAPI novo da Caixa sozinho; importação manual pela tela como reserva.
 - Migração `0014` (tabelas de referência, permissões, padrão de UF/regime da empresa). Testes: +4 unitários, +7 de banco.
+- Bases da empresa (TCPO, estaduais, própria): importação de qualquer planilha com colunas sugeridas e conferidas, preço
+  na UF/regime informados; "Comparar com outra composição" entre bases (códigos diferentes). Testes: +3 unitários.
 
 ## Painel de pedidos por obra — Etapa B (out/2026)
 - "Entregas e recebimentos" virou painel de acompanhamento: totais (pedidos em aberto, grupos em compra, aguardando

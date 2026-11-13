@@ -13,12 +13,13 @@ async function carregar() {
   carregando = true;
   try {
     const c = await sb();
-    const { data, error } = await c.from('v_medicao_a_lancar').select('project_id, phase_id, period_end, amount');
+    const { data, error } = await c.from('v_medicao_a_lancar').select('project_id, phase_id, period_end, amount, contract_id');
     if (error) throw erroBanco(error, 'medições a lançar');
     porObra.clear();
     for (const r of data || []) {
       if (!porObra.has(r.project_id)) porObra.set(r.project_id, []);
-      porObra.get(r.project_id).push({ faseId: r.phase_id || null, data: r.period_end, valor: Number(r.amount) || 0 });
+      // doContrato: medição de um contrato de mão de obra (o valor já está no comprometido pelo contrato — migração 0015)
+      porObra.get(r.project_id).push({ faseId: r.phase_id || null, data: r.period_end, valor: Number(r.amount) || 0, doContrato: !!r.contract_id });
     }
     queueRender();
   } catch (e) { console.warn(e.message); }

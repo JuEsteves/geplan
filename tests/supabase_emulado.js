@@ -8,7 +8,7 @@ import { PARSERS } from './banco_pglite.js';
 const PGLITE = 'https://cdn.jsdelivr.net/npm/@electric-sql/pglite@0.2.17/dist/index.js';
 const MIGRACOES = ['20261011000001_base_organizacoes.sql', '20261011000002_obras_biblioteca.sql',
   '20261011000003_orcamento_planejamento.sql', '20261011000004_execucao_financeiro.sql', '20261011000005_indicadores.sql', '20261012000006_fornecedores.sql',
-  '20261013000007_suprimentos.sql', '20261014000008_diario.sql', '20261015000009_medicoes.sql', '20261016000010_integracao_custos.sql', '20261017000011_seguranca_categorias.sql', '20261018000012_leitura_projeto.sql', '20261019000013_permissoes_nulas.sql', '20261027000014_bases_referencia.sql'];
+  '20261013000007_suprimentos.sql', '20261014000008_diario.sql', '20261015000009_medicoes.sql', '20261016000010_integracao_custos.sql', '20261017000011_seguranca_categorias.sql', '20261018000012_leitura_projeto.sql', '20261019000013_permissoes_nulas.sql', '20261027000014_bases_referencia.sql', '20261113000015_contratos_mao_obra.sql'];
 
 const b64url = (o) => btoa(unescape(encodeURIComponent(JSON.stringify(o)))).replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
 const desb64 = (s) => JSON.parse(decodeURIComponent(escape(atob(s.replace(/-/g, '+').replace(/_/g, '/')))));
@@ -30,7 +30,7 @@ export async function criarEmulador({ url = 'http://emulado.supabase.co', anonKe
   } else {
     // banco de teste criado antes de uma migração nova: aplica só as que faltam (como o "db push" faria)
     const NOVAS = { '20261013000007_suprimentos.sql': 'public.purchase_orders', '20261014000008_diario.sql': 'public.rdo_media',
-      '20261015000009_medicoes.sql': 'public.measurement_sheets', '20261016000010_integracao_custos.sql': 'public.v_medicao_a_lancar', '20261018000012_leitura_projeto.sql': 'public.project_ai_reads', '20261027000014_bases_referencia.sql': 'public.ref_bases' };
+      '20261015000009_medicoes.sql': 'public.measurement_sheets', '20261016000010_integracao_custos.sql': 'public.v_medicao_a_lancar', '20261018000012_leitura_projeto.sql': 'public.project_ai_reads', '20261027000014_bases_referencia.sql': 'public.ref_bases', '20261113000015_contratos_mao_obra.sql': 'public.labor_contracts' };
     for (const [m, marca] of Object.entries(NOVAS)) {
       if (!(await db.query('select to_regclass($1) is not null as ok', [marca])).rows[0].ok) await db.exec(await texto(`${base}supabase/migrations/${m}`));
     }

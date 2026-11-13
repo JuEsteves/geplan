@@ -11,6 +11,7 @@ import { interpretar, criarObraImportada, etapasDoModelo, selecaoPadrao, instanc
 import { moverNo, subarvore } from '../js/model.js';
 import { etapasParaIA, selecaoDaSugestao, aplicarSugestao } from '../js/leituraProjeto.js';
 import { criarObraExemplo } from '../js/obraExemplo.js';
+import { gerarParcelas, somarMeses, numeroContrato, resumoContrato, fasesSemContrato } from '../js/contratosRegras.js';
 import { interpretarReferenciaSinapi, custoEm, maoDeObraItens, nomeVersao, variacao, acharCabecalhoBase, sugerirColunas, interpretarBaseEmpresa, custoNaBase } from '../js/basesRefDados.js';
 import { interpretarSinapi, maoDeObra, adicionarDaSinapi } from '../js/sinapi.js';
 import { LIBS, loadScript } from '../js/libs.js';
@@ -835,6 +836,13 @@ teste('Data de corte (despesa, aditivo, pagamento) e filtro de categoria (orçad
   const m = custosPorFase(obraIntegracao(), { totalItem: (id) => totais[id], aLancar, categoria: 'Material' });
   perto(m.totais.comprometido, 300); perto(m.totais.aLancar, 0); perto(m.totais.orcado, 1400);
 });
+teste('Medição a lançar de contrato de mão de obra: aparece "a lançar" mas não soma de novo no comprometido (0015)', () => {
+  const doContrato = [...aLancar, { faseId: 'F1', data: '2026-10-13', valor: 500, doContrato: true }];
+  const r = resumoCustos(obraIntegracao(), { aLancar: doContrato });
+  igual(r.comprometido, 5500 + 300 + 800 + 100 + 280); igual(r.aLancar, 780); igual(r.aIncorrer, (5500 - 1200) + 280);
+  const p = custosPorFase(obraIntegracao(), { totalItem: (id) => totais[id], aLancar: doContrato });
+  perto(p.fases.find((x) => x.id === 'F1').comprometido, 150 + 800 + 280); perto(p.fases.find((x) => x.id === 'F1').aLancar, 780);
+});
 
 /* ---------- 7. Importação da planilha ---------- */
 grupo('7. Importador (lê docs/modelo_orcamento_cronograma.xlsx, se existir)');
@@ -1071,7 +1079,32 @@ function testeBasesEmpresa() {
   });
 }
 
-testeImportacao().then(testeSinapi).then(testeBasesRef).then(testeBasesEmpresa).finally(() => {
+/* ---------- 24. Contratos de mão de obra (regras da tela; o banco confere em tests/db.html grupo 19) ---------- */
+function testeContratos() {
+  grupo('24. Contratos de mão de obra — parcelas, lançado/saldo e "quando contratar"');
+  teste('Parcelas iguais com centavos na última; uma por mês mantendo o dia (31/01 → 28/02)', () => {
+    const p = gerarParcelas(1000, 3, '2027-01-31');
+    igual(p.map((x) => `${x.number}:${x.due_date}:${x.amount}`).join(' '), '1:2027-01-31:333.33 2:2027-02-28:333.33 3:2027-03-31:333.34');
+    igual(gerarParcelas(20000, 1, '2026-12-05')[0].amount, 20000);
+    verdade(/valor/.test((() => { try { gerarParcelas(0, 2, '2026-12-05'); } catch (e) { return e.message; } return ''; })()), 'valor zero aceito');
+    igual(somarMeses('2026-11-30', 3), '2027-02-28'); igual(numeroContrato(7), 'CTR-0007');
+  });
+  teste('Lançado, pago e saldo pelas despesas ligadas ao compromisso do contrato (parcelas e medições)', () => {
+    const k = { amount: 20000, contract_id: 'c1' };
+    const desp = [{ compromissoId: 'c1', valor: 8000, pagamentos: [{ valor: 5000 }] }, { compromissoId: 'c1', valor: 3000 }, { compromissoId: 'outro', valor: 999 }, { valor: 50 }];
+    const r = resumoContrato(k, desp);
+    igual(`${r.lancado}|${r.pago}|${r.saldo}|${r.pct}`, '11000|5000|9000|55');
+    igual(resumoContrato({ amount: 100, contract_id: null }, desp).lancado, 0, 'rascunho sem compromisso:');
+  });
+  teste('Quando contratar: fases que começam em até 60 dias (ou já começaram) sem contrato ativo; encerrado não cobre', () => {
+    const fases = [{ id: 'F1', inicio: 100, termino: 130 }, { id: 'F2', inicio: 150, termino: 200 }, { id: 'F3', inicio: 300, termino: 330 }, { id: 'F4', inicio: 20, termino: 90 }, { id: 'F5', inicio: 110, termino: 140 }];
+    const contratos = [{ status: 'vigente', phase_ids: ['F1'] }, { status: 'rescindido', phase_ids: ['F2'] }, { status: 'rascunho', phase_ids: ['F5'], deleted_at: 'x' }];
+    const r = fasesSemContrato(fases, contratos, 100, 60);
+    igual(r.map((f) => `${f.id}:${f.diasAte}`).join(), 'F5:10,F2:50', 'F1 contratada, F3 longe, F4 já terminou, rascunho excluído não cobre:');
+  });
+}
+
+testeImportacao().then(testeSinapi).then(testeBasesRef).then(testeBasesEmpresa).then(testeContratos).finally(() => {
   const r = document.getElementById('resumo');
   r.className = fail ? 'err' : 'ok';
   r.textContent = `${ok} passaram · ${fail} falharam${skip ? ` · ${skip} pulados` : ''}`;

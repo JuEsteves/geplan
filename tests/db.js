@@ -20,6 +20,7 @@ const MIGRACOES = [
   '20261018000012_leitura_projeto.sql',
   '20261019000013_permissoes_nulas.sql',
   '20261027000014_bases_referencia.sql',
+  '20261113000015_contratos_mao_obra.sql',
 ];
 
 const out = document.getElementById('out');
@@ -451,6 +452,7 @@ try {
   await testesIntegracao({ alice, carol, erin, A1, etapa, at1 });
   await testesLeitura({ alice, bob, carol, dave, orgA, A1, B1 });
   await testesBases({ alice, bob, carol, dave, mallory, orgA, orgB });
+  await testesContratos({ alice, bob, carol, erin, mallory, orgA });
   await testesSeguranca({ bob, orgA, mallory, A1 });
   await testesSincronizacao({ novoUsuario, bob });
 } catch (e) {
@@ -1170,6 +1172,94 @@ async function testesBases({ alice, bob, carol, dave, mallory, orgA, orgB }) {
     await recusa(() => como(carol, () => q(`select public.definir_referencia_org($1, 'SP', 'desonerado')`, [orgA])), /administrador/);
     await recusa(() => como(bob, () => q(`select public.definir_referencia_org($1, 'SP', 'desonerado')`, [orgA])), /administrador/);
     await recusa(() => como(alice, () => q(`select public.definir_referencia_org($1, 'SP', 'meio')`, [orgA])), /check|violates/);
+  });
+}
+
+/* ---------- 19. Contratos de mão de obra (empreiteiros) ---------- */
+async function testesContratos({ alice, bob, carol, erin, mallory, orgA }) {
+  grupo('19. Contratos de mão de obra: rascunho → vigente, Financeiro sem duplicidade, parcelas, medição ligada ao contrato');
+  let C, fase, ativ, w, k1, k2;
+  const custos = async () => { const r = await um('select committed, incurred from public.v_project_costs where project_id = $1', [C]); return `${Number(r.committed)}/${Number(r.incurred)}`; };
+  await teste('Cenário: obra, fase com atividade e profissional', async () => {
+    await como(alice, async () => {
+      C = (await um(`insert into public.projects (org_id, name, planned_start) values ($1, 'Obra Contratos', '2026-11-02') returning id`, [orgA])).id;
+      fase = (await um(`insert into public.wbs_nodes (project_id, code, level, description) values ($1, '1', 1, 'Estrutura') returning id`, [C])).id;
+      ativ = (await um(`insert into public.wbs_nodes (project_id, parent_id, code, level, description) values ($1, $2, '1.1', 2, 'Pilares') returning id`, [C, fase])).id;
+      await q('insert into public.project_members (project_id, user_id) values ($1, $2), ($1, $3)', [C, carol.id, erin.id]);
+    });
+    w = (await um(`insert into public.workers (org_id, name, specialties) values ($1, 'Ricardo Empreiteiro', 'Pedreiro') returning id`, [orgA])).id;
+  });
+  await teste('Rascunho: quem contrata cria (número por obra); supervisora e outra empresa não; não nasce vigente', async () => {
+    k1 = (await como(alice, () => um(`insert into public.labor_contracts (org_id, project_id, worker_id, title, phase_ids, amount, payment_mode, start_date, end_date)
+      values ($1, $2, $3, 'Estrutura (empreitada)', array[$4]::uuid[], 20000, 'parcelas', '2026-11-02', '2027-02-28') returning id, number`, [orgA, C, w, fase])));
+    igual(k1.number, 1); k1 = k1.id;
+    await recusa(() => como(carol, () => q(`insert into public.labor_contracts (org_id, project_id, worker_id, title) values ($1, $2, $3, 'X')`, [orgA, C, w])), /row-level security/);
+    await recusa(() => como(bob, () => q(`insert into public.labor_contracts (org_id, project_id, worker_id, title) values ($1, $2, $3, 'X')`, [orgA, C, w])), /row-level security/);
+    await recusa(() => como(alice, () => q(`insert into public.labor_contracts (org_id, project_id, worker_id, title, status) values ($1, $2, $3, 'X', 'vigente')`, [orgA, C, w])), /começa como rascunho/);
+    igual((await como(carol, () => q('select id from public.labor_contracts where project_id = $1', [C]))).length, 0, 'supervisora vê valores:');
+  });
+  await teste('Ativar confere as parcelas (soma = valor) e cria o compromisso "Mão de obra" no Financeiro', async () => {
+    await recusa(() => como(alice, () => q('select public.contrato_mo_ativar($1)', [k1])), /Gere as parcelas/);
+    for (const [n, d, v] of [[1, '2026-12-05', 8000], [2, '2027-01-05', 8000], [3, '2027-02-05', 3000]])
+      await como(alice, () => q('insert into public.labor_contract_installments (contract_id, project_id, number, due_date, amount) values ($1, $2, $3, $4, $5)', [k1, C, n, d, v]));
+    await recusa(() => como(alice, () => q('select public.contrato_mo_ativar($1)', [k1])), /soma das parcelas/);
+    await como(alice, () => q('update public.labor_contract_installments set amount = 4000 where contract_id = $1 and number = 3', [k1]));
+    await como(alice, () => q('select public.contrato_mo_ativar($1)', [k1]));
+    const k = await um('select status, contract_id from public.labor_contracts where id = $1', [k1]);
+    igual(k.status, 'vigente');
+    const ct = await um('select kind, category, amount, status, supplier_name, phase_id from public.contracts where id = $1', [k.contract_id]);
+    igual(`${ct.kind}|${ct.category}|${Number(ct.amount)}|${ct.status}|${ct.supplier_name}`, 'Contrato|Mão de obra|20000|Aprovado|Ricardo Empreiteiro'); igual(ct.phase_id, fase);
+    igual(await custos(), '20000/0', 'comprometido:');
+  });
+  await teste('Vigente não muda valor/condições nem parcelas (só observações); lançar parcela abate do comprometido', async () => {
+    await recusa(() => como(alice, () => q('update public.labor_contracts set amount = 1 where id = $1', [k1])), /não mudam/);
+    await recusa(() => como(alice, () => q('update public.labor_contract_installments set amount = 1 where contract_id = $1', [k1])), /não mudam/);
+    await como(alice, () => q(`update public.labor_contracts set notes = 'assinado em 02/11' where id = $1`, [k1]));
+    const p1 = (await um('select id from public.labor_contract_installments where contract_id = $1 and number = 1', [k1])).id;
+    await recusa(() => como(carol, () => q('select public.contrato_mo_lancar_parcela($1)', [p1])), /não lança despesas/);
+    await como(erin, () => q(`select public.contrato_mo_lancar_parcela($1, '2026-12-05')`, [p1]));
+    await recusa(() => como(erin, () => q('select public.contrato_mo_lancar_parcela($1)', [p1])), /já foi lançada/);
+    const e = await um('select category, amount, contract_id is not null ligada, phase_id from public.expenses where id = (select expense_id from public.labor_contract_installments where id = $1)', [p1]);
+    igual(`${e.category}|${Number(e.amount)}|${e.ligada}`, 'Mão de obra|8000|true'); igual(e.phase_id, fase);
+    igual(await custos(), '20000/8000', 'sem contar duas vezes:');
+  });
+  await teste('Por medição: ativar cria o vínculo (empreitada, atividades da fase); medição lançada vira despesa do contrato', async () => {
+    const w2 = (await um(`insert into public.workers (org_id, name) values ($1, 'Equipe Paredes') returning id`, [orgA])).id;
+    k2 = (await como(alice, () => um(`insert into public.labor_contracts (org_id, project_id, worker_id, title, phase_ids, amount, payment_mode, start_date)
+      values ($1, $2, $3, 'Alvenaria por medição', array[$4]::uuid[], 10000, 'medicao', '2026-11-02') returning id`, [orgA, C, w2, fase]))).id;
+    await como(alice, () => q('select public.contrato_mo_ativar($1)', [k2]));
+    const ag = await um('select a.pay_type, a.contract_amount, a.activity_ids @> array[$2]::uuid[] cobre from public.worker_agreements a join public.labor_contracts k on k.agreement_id = a.id where k.id = $1', [k2, ativ]);
+    igual(`${ag.pay_type}|${Number(ag.contract_amount)}|${ag.cobre}`, 'empreitada|10000|true');
+    const kw = (await um('select worker_id from public.labor_contracts where id = $1', [k2])).worker_id;
+    let s;
+    await como(carol, async () => {
+      s = (await um(`insert into public.measurement_sheets (project_id, period_start, period_end) values ($1, '2026-11-02', '2026-11-30') returning id`, [C])).id;
+      const it = (await um(`insert into public.measurement_items (sheet_id, project_id, activity_id, period_pct) values ($1, $2, $3, 30) returning id`, [s, C, ativ])).id;
+      await q(`insert into public.measurement_workers (item_id, sheet_id, project_id, worker_id, measure, produced_qty) values ($1, $2, $3, $4, 'percentual', 30)`, [it, s, C, kw]);
+      await q(`select public.medicao_acao($1, 'enviar')`, [s]);
+    });
+    await como(alice, () => q(`select public.medicao_acao($1, 'aprovar')`, [s]));
+    igual(await custos(), '30000/8000', 'medição a lançar do contrato somou em cima do contrato:');
+    igual(Number((await um('select to_launch from public.v_project_costs where project_id = $1', [C])).to_launch), 3000, 'a lançar:');
+    await como(erin, () => q('select public.medicao_lancar_despesas($1)', [s]));
+    const e = await um(`select e.amount, e.contract_id = k.contract_id ligada from public.expenses e, public.labor_contracts k where k.id = $1 and e.document like 'MED-%' and e.project_id = $2`, [k2, C]);
+    igual(`${Number(e.amount)}|${e.ligada}`, '3000|true');
+    igual(await custos(), '30000/11000', 'depois de lançada:');
+  });
+  await teste('Encerrar exige motivo; o compromisso passa a contar só o lançado; o vínculo deixa de valer', async () => {
+    await recusa(() => como(alice, () => q(`select public.contrato_mo_encerrar($1, 'rescindido', '')`, [k2])), /motivo/);
+    await como(alice, () => q(`select public.contrato_mo_encerrar($1, 'rescindido', 'abandono do serviço')`, [k2]));
+    const k = await um('select k.status, c.status cs, a.valid_to is not null fim from public.labor_contracts k join public.contracts c on c.id = k.contract_id join public.worker_agreements a on a.id = k.agreement_id where k.id = $1', [k2]);
+    igual(`${k.status}|${k.cs}|${k.fim}`, 'rescindido|Encerrado|true');
+    igual(await custos(), '23000/11000', 'rescindido conta só o lançado:');
+  });
+  await teste('Arquivo do contrato: quem vê valores lê, quem contrata grava; supervisora e outra empresa não', async () => {
+    const nome = `${orgA}/contratos/${k1}/contrato.pdf`;
+    igual((await como(alice, () => um('select public.pode_gravar_arquivo($1) v', [nome]))).v, true);
+    igual((await como(erin, () => um('select public.pode_ler_arquivo($1) v', [nome]))).v, true);
+    igual((await como(carol, () => um('select public.pode_ler_arquivo($1) v', [nome]))).v, false, 'supervisora:');
+    igual((await como(bob, () => um('select public.pode_ler_arquivo($1) v', [nome]))).v, false, 'outra empresa:');
+    igual((await como(mallory, () => um('select public.pode_gravar_arquivo($1) v', [nome]))).v, false, 'sem empresa:');
   });
 }
 

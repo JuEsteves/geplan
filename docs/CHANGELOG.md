@@ -1,5 +1,12 @@
 # Histórico de versões do GEPLAN
 
+## Contratos de mão de obra — Etapa D (nov/2026)
+- Aba **Contratos** na obra e menu "Contratos de mão de obra": empreiteiros e prestadores com escopo (fases da EAP),
+  valor, forma de pagamento (por medição, mensal, parcelas, avulso), prazo, situação e o contrato assinado anexado.
+- Integração sem duplicidade: contrato vigente = compromisso no Financeiro; parcelas e medições lançadas abatem dele;
+  medição a lançar de contrato não soma de novo (banco e app). "Quando contratar" pelas datas do cronograma.
+- Migração `0015`. Testes: +8 de banco, +4 unitários. Ver `docs/CONTRATOS.md`.
+
 ## Bases de referência e SINAPI automático — Etapa C (out/2026)
 - Composições › **Bases de referência**: SINAPI no banco (todas as UF, desonerado e não desonerado), pesquisa, custo
   na UF/regime escolhidos (padrão da empresa), analítico com preços, comparação entre estados e entre meses, e

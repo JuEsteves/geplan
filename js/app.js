@@ -22,6 +22,7 @@ import { liberacoesDe } from './liberacoes.js';
 import { viewDiario, acoesDiario, mudancasDiario, entradasDiario, depoisDiario, limparDiario, formRdoSujo } from './diario.js';
 import { viewMedicoes, acoesMedicoes, mudancasMedicoes, entradasMedicoes, limparMedicoes } from './medicoes.js';
 import { viewBases, acoesBases, mudancasBases, entradasBases, limparBases } from './basesRef.js';
+import { acoesContratos, mudancasContratos, limparContratos } from './contratos.js';
 
 // Modo nuvem (Supabase) quando js/config.js tiver URL e chave; senão, modo Google Drive (como antes).
 const NUVEM = nuvemConfigurada();
@@ -209,7 +210,7 @@ async function sairNuvem() {
   if (nuvem.pendente()) await nuvem.enviar().catch(() => {});
   if (nuvem.pendente() && !(await ask('Há alterações que ainda NÃO foram enviadas para a nuvem e serão perdidas. Sair mesmo assim?', 'Sair'))) return;
   await conta.sair().catch(() => {});
-  nuvem.encerrar(); store.clearLocal(); limparEmpresa(); limparFornecedores(); limparSuprimentos(); limparDiario(); limparMedicoes(); limparBases();
+  nuvem.encerrar(); store.clearLocal(); limparEmpresa(); limparFornecedores(); limparSuprimentos(); limparDiario(); limparMedicoes(); limparBases(); limparContratos();
   sessaoAtual = null; authorized = false;
   location.hash = '#/inicio';
   renderGateNuvem('entrar');
@@ -219,7 +220,7 @@ window.addEventListener('geplan:aviso', (e) => toast(e.detail, 7000));
 window.addEventListener('geplan:trocar-empresa', async (e) => {
   await nuvem.enviar().catch(() => {});
   if (nuvem.pendente() && !(await ask('Há alterações não enviadas nesta empresa. Trocar mesmo assim (elas serão perdidas)?', 'Trocar'))) return queueRender();
-  nuvem.encerrar(); store.clearLocal(); limparFornecedores(); limparSuprimentos(); limparDiario(); limparMedicoes(); limparBases();
+  nuvem.encerrar(); store.clearLocal(); limparFornecedores(); limparSuprimentos(); limparDiario(); limparMedicoes(); limparBases(); limparContratos();
   location.hash = '#/inicio';
   await entrarNaEmpresa(e.detail);
 });
@@ -400,8 +401,8 @@ const mudancasGerais = {
 };
 
 /* ---------- eventos ---------- */
-const acoes = { ...acoesGerais, ...acoesBiblioteca, ...acoesObra, ...acoesFases, ...acoesSinapi, ...acoesGestao, ...acoesEmpresa, ...acoesFornecedores, ...acoesSuprimentos, ...acoesDiario, ...acoesMedicoes, ...acoesBases };
-const mudancas = { ...mudancasGerais, ...mudancasBiblioteca, ...mudancasObra, ...mudancasFases, ...mudancasSinapi, ...mudancasGestao, ...mudancasEmpresa, ...mudancasInicio, ...mudancasFornecedores, ...mudancasSuprimentos, ...mudancasDiario, ...mudancasMedicoes, ...mudancasBases };
+const acoes = { ...acoesGerais, ...acoesBiblioteca, ...acoesObra, ...acoesFases, ...acoesSinapi, ...acoesGestao, ...acoesEmpresa, ...acoesFornecedores, ...acoesSuprimentos, ...acoesDiario, ...acoesMedicoes, ...acoesBases, ...acoesContratos };
+const mudancas = { ...mudancasGerais, ...mudancasBiblioteca, ...mudancasObra, ...mudancasFases, ...mudancasSinapi, ...mudancasGestao, ...mudancasEmpresa, ...mudancasInicio, ...mudancasFornecedores, ...mudancasSuprimentos, ...mudancasDiario, ...mudancasMedicoes, ...mudancasBases, ...mudancasContratos };
 const entradas = { ...entradasBiblioteca, ...entradasObra, ...entradasFases, ...entradasSinapi, ...entradasInicio, ...entradasFornecedores, ...entradasSuprimentos, ...entradasDiario, ...entradasMedicoes, ...entradasBases };
 
 $view.addEventListener('click', (e) => {

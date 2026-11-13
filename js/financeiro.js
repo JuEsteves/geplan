@@ -106,10 +106,12 @@ export function resumoCustos(obra, { ateDia = null, aLancar = [] } = {}) {
   const comprometidoContratos = comps.reduce((s, c) => s + compromissoEfetivo(c, porComp.get(c.id) || 0), 0);
   const avulsas = desp.filter((d) => !d.compromissoId || !comps.some((c) => c.id === d.compromissoId));
   const totalALancar = aLancar.filter((m) => dentro(m.data)).reduce((s, m) => s + (Number(m.valor) || 0), 0);
-  const comprometido = comprometidoContratos + avulsas.reduce((s, d) => s + (Number(d.valor) || 0), 0) + totalALancar;
+  // medição a lançar de contrato de mão de obra já está no comprometido pelo valor do contrato (não soma de novo)
+  const aLancarForaDeContrato = aLancar.filter((m) => dentro(m.data) && !m.doContrato).reduce((s, m) => s + (Number(m.valor) || 0), 0);
+  const comprometido = comprometidoContratos + avulsas.reduce((s, d) => s + (Number(d.valor) || 0), 0) + aLancarForaDeContrato;
   const incorrido = desp.reduce((s, d) => s + (Number(d.valor) || 0), 0);
   const pago = desp.reduce((s, d) => s + pagoDespesa(d), 0);
-  const aIncorrer = comps.reduce((s, c) => s + Math.max(0, compromissoEfetivo(c, porComp.get(c.id) || 0) - (porComp.get(c.id) || 0)), 0) + totalALancar;
+  const aIncorrer = comps.reduce((s, c) => s + Math.max(0, compromissoEfetivo(c, porComp.get(c.id) || 0) - (porComp.get(c.id) || 0)), 0) + aLancarForaDeContrato;
   const alertas = [];
   for (const c of comps) {
     const usado = porComp.get(c.id) || 0;
@@ -187,7 +189,8 @@ export function custosPorFase(obra, { totalItem = () => 0, ateDia = null, aLanca
     for (const m of aLancar) {
       if (!dentroObr(m.data)) continue;
       const aloc = [{ fase: m.faseId || null, share: 1 }];
-      somar(aloc, 'comprometido', Number(m.valor) || 0); somar(aloc, 'aLancar', Number(m.valor) || 0);
+      if (!m.doContrato) somar(aloc, 'comprometido', Number(m.valor) || 0);
+      somar(aloc, 'aLancar', Number(m.valor) || 0);
     }
   }
 

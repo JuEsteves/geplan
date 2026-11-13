@@ -37,6 +37,7 @@ export const MODULOS = {
   medicoes: { rotulo: 'Medições', aba: 'medicoes', secao: 'avanco', texto: 'Avanço físico acumulado por atividade.' },
   financeiro: { rotulo: 'Custos previstos e realizados', aba: 'financeiro', texto: 'Orçado, comprometido, incorrido e pago.' },
   diario: { rotulo: 'Diário de obra', aba: 'diario', texto: 'Registro diário: clima, equipe, serviços e ocorrências.' },
+  contratos: { rotulo: 'Contratos de mão de obra', aba: 'contratos', texto: 'Empreiteiros e prestadores de cada obra: escopo, valor, forma de pagamento, parcelas e prazo.' },
   painel: { rotulo: 'Acompanhamento físico', aba: 'painel', texto: 'Painel da obra: físico planejado × realizado, atrasos e prazos.' },
   compras: { rotulo: 'Compras no Financeiro', aba: 'financeiro', secao: 'compras', texto: 'Pedidos de compra e contratos registrados no Financeiro de cada obra (inclui as compras do quadro).' },
 };
@@ -61,6 +62,7 @@ function menu() {
     { grupo: 'Execução e controle', itens: [
       { id: 'mod-diario', rotulo: 'Diário de obra', href: '#/diario', ico: 'diario' },
       { id: 'mod-painel', rotulo: 'Acompanhamento físico', href: '#/modulo/painel', ico: 'fisico' },
+      ...(nuvem ? [{ id: 'mod-contratos', rotulo: 'Contratos de mão de obra', href: '#/modulo/contratos', ico: 'tarefas' }] : []),
       { id: 'pendencias', rotulo: 'Tarefas e pendências', href: '#/pendencias', ico: 'tarefas' },
     ] },
     { grupo: 'Suprimentos', itens: [
@@ -91,7 +93,7 @@ export function itemAtivo(route) {
   if (route.name === 'obra') {
     if (route.sub === 'compras') return 'mod-compras';
     const porAba = { orcamento: 'mod-orcamento', vinculos: 'mod-orcamento', atividades: 'mod-gantt', gantt: 'mod-gantt', curva: 'mod-curva',
-      medicoes: 'mod-medicoes', financeiro: 'mod-financeiro', diario: 'mod-diario', painel: 'mod-painel', compras: 'sup-quadro', entregas: 'sup-entregas' };
+      medicoes: 'mod-medicoes', financeiro: 'mod-financeiro', diario: 'mod-diario', painel: 'mod-painel', compras: 'sup-quadro', entregas: 'sup-entregas', contratos: 'mod-contratos' };
     return porAba[route.tab] || 'obras';
   }
   if (route.name === 'modulo') return `mod-${route.modulo}`;

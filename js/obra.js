@@ -21,11 +21,12 @@ import { viewSuprimentos } from './suprimentos.js';
 import { viewMedicoes, navMedicoes } from './medicoes.js';
 import { viewDiario } from './diario.js';
 import { comEscopo } from './escopo.js';
+import { viewContratos } from './contratos.js';
 
 // Tudo da obra fica dentro da página da obra, na ordem do trabalho. Compras e Entregas usam o banco (modo nuvem).
 export const TABS = [
   ['painel', 'Painel'], ['atividades', 'EAP'], ['orcamento', 'Orçamento'], ['vinculos', 'Vínculos'], ['gantt', 'Cronograma'],
-  ['curva', 'Físico-financeiro'], ['medicoes', 'Medições'], ['diario', 'Diário de obra'], ['compras', 'Compras', 'nuvem'],
+  ['curva', 'Físico-financeiro'], ['medicoes', 'Medições'], ['diario', 'Diário de obra'], ['contratos', 'Contratos', 'nuvem'], ['compras', 'Compras', 'nuvem'],
   ['entregas', 'Entregas', 'nuvem'], ['financeiro', 'Custos'], ['config', 'Cadastro'],
 ];
 const abasDaObra = () => TABS.filter(([, , so]) => so !== 'nuvem' || nuvemConfigurada());
@@ -139,7 +140,8 @@ export function viewObra(route) {
   const pedida = route.tab === 'acompanhamento' ? 'medicoes' : route.tab;
   const abas = abasDaObra();
   const tab = abas.some(([k]) => k === pedida) ? pedida : 'painel';
-  const body = ['compras', 'entregas', 'diario', 'medicoes'].includes(tab) ? moduloNaObra(c, tab, route.resto || [])
+  const body = tab === 'contratos' ? viewContratos(c, route.resto || [])
+    : ['compras', 'entregas', 'diario', 'medicoes'].includes(tab) ? moduloNaObra(c, tab, route.resto || [])
     : { painel: tabPainel, orcamento: tabOrcamento, vinculos: tabVinculos, atividades: tabAtividades, gantt: tabGantt, curva: tabCurva, financeiro: tabFinanceiro, config: tabConfig }[tab](c);
   const temEAP = o.eap.length > 0;
   const alertas = c.calc.alertasItens + c.calc.alertasAtiv;

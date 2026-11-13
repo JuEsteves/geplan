@@ -650,3 +650,6 @@ fieldset { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12p
 
 /* Bases de referência: linha da UF/base escolhida */
 .linha-destaque td { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+
+/* Contratos: textos com quebras de linha */
+.pre-wrap { white-space: pre-wrap; }

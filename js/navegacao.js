@@ -2,7 +2,7 @@
 // Uma definição só (MENU) gera o menu do computador e do celular. Itens ainda não implementados aparecem como
 // "em breve", sem link — não simulam funcionamento.
 import * as store from './store.js';
-import { esc } from './ui.js';
+import { esc, estaAberto } from './ui.js';
 import { fmtBR, isoBR } from './schedule.js';
 import { configurado as nuvemConfigurada } from './nuvem/supabase.js';
 
@@ -33,8 +33,8 @@ export const MODULOS = {
   gantt: { rotulo: 'Cronograma', aba: 'gantt', texto: 'Gantt, caminho crítico, dependências e linha de base.' },
   curva: { rotulo: 'Curva S', aba: 'curva', texto: 'Curvas física e financeira, planejado × realizado.' },
   orcamento: { rotulo: 'Orçamentos', aba: 'orcamento', texto: 'Itens, composições, BDI, revisões e importação do Excel.' },
-  // no modo nuvem a aba Medições da obra abre nos boletins; o avanço físico é a sub-aba "avanco"
-  medicoes: { rotulo: 'Medições', aba: 'medicoes', secao: 'avanco', texto: 'Avanço físico acumulado por atividade.' },
+  // modo nuvem: medição dos contratos de mão de obra (o avanço físico é a sub-aba "avanco"); modo local: avanço físico
+  medicoes: { rotulo: 'Medições', aba: 'medicoes', texto: 'Medição dos contratos de mão de obra: planilha por % ou por ambiente, medições, retenção e pagamentos.' },
   financeiro: { rotulo: 'Custos previstos e realizados', aba: 'financeiro', texto: 'Orçado, comprometido, incorrido e pago.' },
   diario: { rotulo: 'Diário de obra', aba: 'diario', texto: 'Registro diário: clima, equipe, serviços e ocorrências.' },
   contratos: { rotulo: 'Contratos de mão de obra', aba: 'contratos', texto: 'Empreiteiros e prestadores de cada obra: escopo, valor, forma de pagamento, parcelas e prazo.' },
@@ -52,11 +52,12 @@ function menu() {
       { id: 'mod-gantt', rotulo: 'Cronograma', href: '#/modulo/gantt', ico: 'gantt' },
       { id: 'mod-curva', rotulo: 'Curva S', href: '#/modulo/curva', ico: 'curva' },
     ] },
-    { grupo: 'Orçamento e custos', itens: [
+    { grupo: 'Orçamentos e custos', itens: [
       { id: 'mod-orcamento', rotulo: 'Orçamentos', href: '#/modulo/orcamento', ico: 'orcamento' },
       { id: 'composicoes', rotulo: 'Composições de custos', href: '#/composicoes', ico: 'composicoes' },
-      // modo nuvem: boletins por atividade e profissional; modo local: avanço físico por obra
-      { id: 'mod-medicoes', rotulo: 'Medições', href: nuvem ? '#/medicoes' : '#/modulo/medicoes', ico: 'medicoes' },
+      // modo nuvem: medição dos contratos de mão de obra por obra; modo local: avanço físico por obra
+      { id: 'mod-medicoes', rotulo: 'Medições', href: '#/modulo/medicoes', ico: 'medicoes' },
+      ...(nuvem ? [{ id: 'pagamentos', rotulo: 'Pagamentos de mão de obra', href: '#/pagamentos', ico: 'custos' }] : []),
       { id: 'mod-financeiro', rotulo: 'Custos previstos e realizados', href: '#/modulo/financeiro', ico: 'custos' },
     ] },
     { grupo: 'Execução e controle', itens: [
@@ -102,15 +103,28 @@ export function itemAtivo(route) {
   if (route.name === 'fornecedor') return 'fornecedores';
   if (route.name === 'suprimentos') return route.secao === 'entregas' ? 'sup-entregas' : 'sup-quadro';
   if (route.name === 'diario') return 'mod-diario';
-  if (route.name === 'medicoes') return 'mod-medicoes';
+  if (route.name === 'medicoes') return 'pagamentos';   // cadastro de profissionais e boletins antigos (consulta)
   return route.name;
 }
 
+/** Cor de cada grupo do menu (mesma cor nos atalhos e indicadores da área). */
+export const AREA_GRUPO = { 'Visão geral': 'visao', Planejamento: 'plan', 'Orçamentos e custos': 'orc', 'Execução e controle': 'exec', Suprimentos: 'sup', Documentos: 'doc', Administração: 'adm' };
+
 export function renderMenu(route) {
   const ativo = itemAtivo(route);
-  const html = menu().map((g) => `<div class="nav-grupo"><div class="nav-titulo">${esc(g.grupo)}</div>${g.itens.map((it) => it.futuro
+  const link = (it) => (it.futuro
     ? `<span class="nav-futuro" title="${esc(it.futuro)}" aria-disabled="true">${ICONES[it.ico]}<span>${esc(it.rotulo)}</span><span class="badge">em breve</span></span>`
-    : `<a href="${it.href}" class="${it.id === ativo ? 'active' : ''}" ${it.id === ativo ? 'aria-current="page"' : ''}>${ICONES[it.ico]}<span>${esc(it.rotulo)}</span></a>`).join('')}</div>`).join('');
+    : `<a href="${it.href}" class="${it.id === ativo ? 'active' : ''}" ${it.id === ativo ? 'aria-current="page"' : ''}>${ICONES[it.ico]}<span>${esc(it.rotulo)}</span></a>`);
+  // menu em sanfona: "Visão geral" fica solto no topo; cada área abre/fecha (o grupo da tela atual sempre aberto)
+  const html = menu().map((g) => {
+    const area = AREA_GRUPO[g.grupo] || '';
+    if (g.itens.length === 1 && g.grupo === 'Visão geral') return `<div class="nav-solto" data-area="${area}">${link(g.itens[0])}</div>`;
+    const temAtivo = g.itens.some((it) => it.id === ativo);
+    const aberto = temAtivo || estaAberto(`nav:${g.grupo}`, false);
+    return `<details class="nav-grupo" data-area="${area}" data-secao="nav:${esc(g.grupo)}"${aberto ? ' open' : ''}>
+      <summary class="nav-titulo"><span class="nav-marca" aria-hidden="true"></span>${esc(g.grupo)}<span class="nav-qtd">${g.itens.length}</span></summary>
+      <div class="nav-itens">${g.itens.map(link).join('')}</div></details>`;
+  }).join('');
   document.getElementById('sidenav').innerHTML = html;
   // menu inferior do celular: atalhos principais + "Menu" (abre o menu completo)
   const atalhos = [['inicio', 'Início', '#/inicio', 'inicio'], ['obras', 'Obras', '#/obras', 'obras'], ['mod-gantt', 'Cronograma', '#/modulo/gantt', 'gantt'], ['mod-diario', 'Diário', '#/diario', 'diario']];

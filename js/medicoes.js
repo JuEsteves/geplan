@@ -82,7 +82,7 @@ function indisponivel() {
   return `<div class="page-head"><div><h1>Medições</h1></div></div><div class="card empty"><p>${!nuvemConfigurada()
     ? 'Boletins por atividade e por profissional funcionam no modo nuvem. No modo local, use a aba Medições de cada obra (avanço físico).'
     : papel() === 'cliente' ? 'Seu perfil não tem acesso às medições.' : 'Carregando os dados da empresa…'}</p>
-    <a class="btn" href="#/modulo/medicoes">Avanço físico por obra</a></div>`;
+    <a class="btn" href="#/modulo/painel">Acompanhamento físico por obra</a></div>`;
 }
 
 export function viewMedicoes(route) {
@@ -97,7 +97,7 @@ export function viewMedicoes(route) {
   return `<div class="page-head"><div><h1>Medições</h1><div class="muted">Medição por atividade e por profissional: avanço físico e produção para pagamento, relacionados mas separados.</div></div>
     <div class="row">${aba === 'boletins' && podeMedir() ? `<button class="btn primary" data-act="medNovoBoletim">${I.plus} Novo boletim</button>` : ''}
     ${aba === 'profissionais' && podeCadastrar() ? `<button class="btn primary" data-act="medNovoProf">${I.plus} Novo profissional</button>` : ''}
-    ${foco ? '' : '<a class="btn" href="#/modulo/medicoes">Avanço físico por obra</a>'}</div></div>
+    ${foco ? '' : '<a class="btn" href="#/modulo/painel">Acompanhamento físico por obra</a>'}</div></div>
   ${navMedicoes(aba)}
   <div class="stack" style="margin-top:12px">${M.erro ? `<div class="alert err">${esc(M.erro)}</div>` : ''}${corpo}
   ${!veValores() ? '<div class="muted small">Seu perfil vê as quantidades medidas. Valores de mão de obra ficam com administrador, engenheiro e financeiro.</div>' : ''}</div>`;
@@ -271,7 +271,7 @@ function viewProfissionais() {
         <td class="small">${esc(w.specialties || '')}</td><td class="small">${esc(w.phone || w.email || '')}</td><td class="num">${M.linhas.filter((l) => l.worker_id === w.id).length}</td>
         <td><span class="badge ${w.status === 'ativo' ? 'good' : ''}">${w.status === 'ativo' ? 'Ativo' : 'Inativo'}</span></td></tr>`).join('')}</tbody></table></div>`
       : `<div class="card empty"><p>Nenhum profissional cadastrado.</p>${podeCadastrar() ? `<button class="btn primary" data-act="medNovoProf">${I.plus} Cadastrar</button>` : ''}</div>`}
-    <div class="muted small">Cadastro central da empresa. Nenhum dado bancário é guardado: o pagamento é feito pelo Financeiro.</div>`;
+    <div class="muted small">Cadastro central da empresa. A chave PIX fica em Pagamentos de mão de obra › PIX (só o administrador vê, ou quem ele liberar).</div>`;
 }
 
 function viewProfissional(id) {

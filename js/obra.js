@@ -18,9 +18,10 @@ import { bdiTCU, resumoOrcamento, snapshotOrcamento, compararOrcamento, valorAgr
 import { importarOrcamentoExcel } from './orcImport.js';
 import { configurado as nuvemConfigurada } from './nuvem/supabase.js';
 import { viewSuprimentos } from './suprimentos.js';
-import { viewMedicoes, navMedicoes } from './medicoes.js';
+import { viewMedicaoObra, navMedicao } from './medicao.js';
 import { viewDiario } from './diario.js';
-import { comEscopo } from './escopo.js';
+import { comEscopo, idObraDaRota, linksNoModulo } from './escopo.js';
+import { MODULOS } from './navegacao.js';
 import { viewContratos } from './contratos.js';
 
 // Tudo da obra fica dentro da página da obra, na ordem do trabalho. Compras e Entregas usam o banco (modo nuvem).
@@ -42,10 +43,11 @@ function moduloNaObra(c, tab, resto) {
   else if (tab === 'entregas') html = viewSuprimentos({ secao: 'entregas' });
   else if (tab === 'diario') html = viewDiario({ obra: o.id, secao: resto[0] || 'geral', id: resto[1] || '', modo: resto[2] || '' });
   else if (tab === 'medicoes') {
-    // modo nuvem: boletins por atividade e profissional + avanço físico; modo local: só o avanço físico
+    // modo nuvem: medição dos contratos de mão de obra + avanço físico (separados); modo local: só o avanço físico.
+    // Os boletins antigos saíram do menu (dados preservados; consulta em #/medicoes/boletins).
     if (!nuvemConfigurada()) return tabMedicoes(c);
-    if (resto[0] === 'avanco') return `${navMedicoes('avanco')}<div style="margin-top:12px">${tabMedicoes(c)}</div>`;
-    html = viewMedicoes({ secao: resto[0] || 'boletins', id: resto[1] || '' });
+    if (resto[0] === 'avanco') return `${navMedicao(o.id, 'avanco')}<div style="margin-top:12px">${tabMedicoes(c)}</div>`;
+    return viewMedicaoObra(c, resto);
   }
   return comEscopo(html, o.id).replace(/<(\/?)h1\b/g, '<$1h2');
 }
@@ -132,6 +134,73 @@ function caminhoDaObra(o, c) {
     <span class="n">${p.feito ? '✓' : i + 1}</span><span><b>${p.nome}</b><small>${esc(p.info)}</small></span></a></li>`).join('')}</ol>`;
 }
 
+/** Conteúdo de uma aba da obra (usado na página da obra e na tela do módulo com a faixa de obras). */
+function corpoDaAba(c, tab, resto) {
+  if (tab === 'contratos') return viewContratos(c, resto);
+  if (['compras', 'entregas', 'diario', 'medicoes'].includes(tab)) return moduloNaObra(c, tab, resto);
+  return { painel: tabPainel, orcamento: tabOrcamento, vinculos: tabVinculos, atividades: tabAtividades, gantt: tabGantt, curva: tabCurva, financeiro: tabFinanceiro, config: tabConfig }[tab](c);
+}
+
+/* ---------- módulo com várias obras: faixa de obras + a obra escolhida embaixo ---------- */
+const AREA_MODULO = { gantt: 'plan', curva: 'plan', orcamento: 'orc', medicoes: 'orc', financeiro: 'orc', painel: 'exec', contratos: 'exec', diario: 'exec', compras: 'sup' };
+const SIT_CLASSE = { 'Em dia': 'good', 'Atenção': 'warn', 'Atrasada': 'crit', 'Concluída': 'info' };
+
+/** Obra a mostrar quando o módulo abre sem obra escolhida: a última aberta (se ainda existir) ou a primeira da faixa. */
+export function obraPadraoDoModulo() {
+  const obras = store.obras();
+  let ultima = null;
+  try { ultima = localStorage.getItem('planobras:ultimaObra'); } catch {}
+  return obras.find((o) => o.id === ultima) || ordenarObras(obras)[0] || null;
+}
+function ordenarObras(obras) {
+  const fim = (o) => ['Concluída', 'Cancelada'].includes(o.status);
+  return [...obras].sort((a, b) => fim(a) - fim(b) || String(a.nome).localeCompare(String(b.nome), 'pt-BR'));
+}
+
+/**
+ * #/modulo/<m>/<obra>/<resto>: uma linha só com as obras (rolagem lateral) e, embaixo, o módulo SÓ da obra escolhida —
+ * cada obra é calculada com os próprios dados (contexto da obra); nada é somado ou misturado entre obras.
+ */
+export function viewModuloObras(route, resumoDe) {
+  const m = MODULOS[route.modulo];
+  const o = store.obra(route.obra);
+  if (!m || !o) return '<div class="card empty"><p>Obra não encontrada.</p><a class="btn" href="#/inicio">Voltar à visão geral</a></div>';
+  const area = AREA_MODULO[route.modulo] || 'plan';
+  const termo = (ui.modBusca || '').trim().toLowerCase();
+  const obras = ordenarObras(store.obras()).filter((x) => x.id === o.id || !termo || `${x.nome} ${x.codigo || ''} ${x.cliente?.nome || ''} ${x.cidade || ''}`.toLowerCase().includes(termo));
+  const cartao = (x) => {
+    const r = resumoDe(x);
+    const ativa = x.id === o.id;
+    return `<a class="faixa-obra${ativa ? ' ativa' : ''}" href="#/modulo/${route.modulo}/${x.id}" ${ativa ? 'aria-current="true"' : ''}>
+      <div class="row between" style="gap:6px;flex-wrap:nowrap"><b class="faixa-nome">${esc(x.nome)}</b><span class="badge ${SIT_CLASSE[r.situacao] || ''}">${esc(r.situacao)}</span></div>
+      <div class="muted small">${esc(x.status || 'Planejamento')} · término ${r.termino ? fmtBR(r.termino) : x.terminoPlanejado ? isoBR(x.terminoPlanejado) : '—'}</div>
+      ${r.temAvanco ? `<div class="faixa-barra" title="realizado ${fmtNum(r.av.fisicoReal, 0)}% · planejado ${fmtNum(r.av.fisicoPlan, 0)}%"><span style="width:${Math.min(100, r.av.fisicoReal)}%"></span><i style="left:${Math.min(100, r.av.fisicoPlan)}%"></i></div>
+        <div class="muted small">físico ${fmtNum(r.av.fisicoReal, 1)}% de ${fmtNum(r.av.fisicoPlan, 1)}% planejado</div>` : `<div class="muted small">${r.temEap ? 'sem peso para o avanço' : 'sem EAP'}</div>`}
+    </a>`;
+  };
+  const c = contexto(o);
+  const resto = route.resto.length ? route.resto : (m.secao ? [m.secao] : []);
+  const corpo = linksNoModulo(corpoDaAba(c, m.aba, resto));
+  return `<div class="page-head" data-area="${area}"><div><h1>${esc(m.rotulo)}</h1><div class="muted">${esc(m.texto)} Escolha a obra na faixa; os dados abaixo são só dela.</div></div></div>
+    <div class="faixa-obras-wrap" data-area="${area}">
+      <div class="row between" style="margin-bottom:8px">
+        <div class="lateral-titulo">Obras (${store.obras().length})</div>
+        ${store.obras().length > 4 ? `<input data-inp="modBusca" data-key="modBusca" value="${esc(ui.modBusca || '')}" placeholder="Filtrar obras…" style="width:240px;max-width:100%">` : ''}
+      </div>
+      <div class="faixa-obras" role="list">${obras.map(cartao).join('')}</div>
+    </div>
+    <div class="modulo-obra card" data-area="${area}">
+      <div class="modulo-obra-topo">
+        <div><div class="muted small">${esc(m.rotulo)} da obra</div><h2>${esc(o.nome)}</h2></div>
+        <a class="btn sm" href="#/obra/${o.id}/${m.aba}${resto.length ? `/${resto.join('/')}` : ''}">Abrir a página da obra →</a>
+      </div>
+      ${avisoDoPerfil()}
+      ${c.cron.ciclo ? `<div class="alert err" style="margin-bottom:14px"><b>Dependência circular</b> entre ${c.cron.cicloIds.map((id) => c.codigoDe(id)).slice(0, 12).join(', ')}. Revise as predecessoras.</div>` : ''}
+      ${corpo}
+    </div>`;
+}
+export const entradasModulo = { modBusca(el) { ui.modBusca = el.value; queueRender(); } };
+
 /* ---------- cabeçalho da obra ---------- */
 export function viewObra(route) {
   const o = store.obra(route.id);
@@ -140,9 +209,7 @@ export function viewObra(route) {
   const pedida = route.tab === 'acompanhamento' ? 'medicoes' : route.tab;
   const abas = abasDaObra();
   const tab = abas.some(([k]) => k === pedida) ? pedida : 'painel';
-  const body = tab === 'contratos' ? viewContratos(c, route.resto || [])
-    : ['compras', 'entregas', 'diario', 'medicoes'].includes(tab) ? moduloNaObra(c, tab, route.resto || [])
-    : { painel: tabPainel, orcamento: tabOrcamento, vinculos: tabVinculos, atividades: tabAtividades, gantt: tabGantt, curva: tabCurva, financeiro: tabFinanceiro, config: tabConfig }[tab](c);
+  const body = corpoDaAba(c, tab, route.resto || []);
   const temEAP = o.eap.length > 0;
   const alertas = c.calc.alertasItens + c.calc.alertasAtiv;
   return `<div class="page-head" style="margin-bottom:10px"><div>
@@ -713,7 +780,7 @@ function tabConfig(c) {
 /* =====================================================================
    AÇÕES
    ===================================================================== */
-const obraAtual = () => store.obra(location.hash.split('/')[2]);
+const obraAtual = () => store.obra(idObraDaRota());
 const ativ = (o, id) => o.eap.find((a) => a.id === id);
 
 async function novaComposicaoRapida() {

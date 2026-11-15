@@ -26,6 +26,32 @@ export const ui = {
   expandidos: {},
 };
 
+/* ---------- identidade visual: áreas e seções recolhíveis ---------- */
+/** Cor de cada área do sistema (variáveis --area-* do CSS). */
+export const AREAS = { visao: 'visao', plan: 'plan', orc: 'orc', exec: 'exec', sup: 'sup', doc: 'doc', adm: 'adm' };
+const CHAVE_SECOES = 'geplan:secoes';
+function secoesSalvas() {
+  try { return JSON.parse(localStorage.getItem(CHAVE_SECOES) || '{}') || {}; } catch { return {}; }
+}
+/** Lembra (só neste navegador; é preferência de tela, não dado) se a seção/grupo ficou aberto. */
+export function lembrarAberto(id, aberto) {
+  if (!id) return;
+  try { const s = secoesSalvas(); s[id] = aberto ? 1 : 0; localStorage.setItem(CHAVE_SECOES, JSON.stringify(s)); } catch {}
+}
+export function estaAberto(id, padrao = true) {
+  const v = secoesSalvas()[id];
+  return v === undefined ? padrao : !!v;
+}
+/** Seção recolhível (+/−) com faixa de cor da área. `acoes` fica no cabeçalho, à direita. */
+export function secao({ id, titulo, n = null, corpo, aberta = true, area = '', acoes = '', classe = '' }) {
+  const abre = estaAberto(id, aberta);
+  return `<details class="secao card${classe ? ` ${classe}` : ''}"${area ? ` data-area="${area}"` : ''} data-secao="${esc(id)}"${abre ? ' open' : ''}>
+    <summary><span class="secao-sinal" aria-hidden="true"></span><h2>${titulo}${n != null ? ` <span class="secao-n">${n}</span>` : ''}</h2>${acoes ? `<span class="secao-acoes">${acoes}</span>` : ''}</summary>
+    <div class="secao-corpo">${corpo}</div></details>`;
+}
+/** Ícone "?" com explicação ao passar o mouse ou tocar. */
+export const ajuda = (texto) => `<span class="ajuda" tabindex="0" role="note" aria-label="${esc(texto)}" data-dica="${esc(texto)}">?</span>`;
+
 export function toast(msg, ms = 3200) {
   const el = document.createElement('div');
   el.textContent = msg;

@@ -3,6 +3,7 @@
 // parcelas, ativação, lançamento de parcela no Financeiro, encerramento e o arquivo do contrato assinado.
 // Regras e permissões no banco (migração 0015); cálculos da tela em js/contratosRegras.js.
 import * as store from './store.js';
+import { idObraDaRota, noModulo } from './escopo.js';
 import { esc, I, ui, toast, ask, info, formDialog, queueRender, parseNum, fmtIn } from './ui.js';
 import { fmtBRL, fmtBR, isoBR, todayISO, todayDay, fmtNum } from './schedule.js';
 import { configurado as nuvemConfigurada, sb, erroBanco } from './nuvem/supabase.js';
@@ -10,6 +11,9 @@ import * as nuvem from './nuvem/nuvem.js';
 import { pode, liberado } from './permissoes.js';
 import { enviarArquivo, urlTemporaria, ACCEPT } from './nuvem/arquivos.js';
 import { FORMAS_PAGAMENTO, STATUS_CONTRATO, numeroContrato, gerarParcelas, resumoContrato, fasesSemContrato } from './contratosRegras.js';
+import { FORMAS_MEDICAO } from './medicaoRegras.js';
+import { invalidarMedicao } from './medicao.js';
+import { membros as listarMembros } from './nuvem/conta.js';
 
 const K = { porObra: new Map(), profissionais: [], carregadoProf: false };
 const ctx = () => nuvem.contexto();
@@ -34,6 +38,7 @@ async function carregar(pid, forcar = false) {
     ]);
     K.profissionais = ok(ws, 'profissionais') || [];
     K.porObra.set(pid, { contratos: ok(ks, 'contratos') || [], parcelas: ok(ps, 'parcelas') || [], carregando: false, em: Date.now(), erro: '' });
+    invalidarMedicao(pid);   // a aba Medições usa os mesmos contratos
   } catch (e) { K.porObra.set(pid, { contratos: [], parcelas: [], carregando: false, em: Date.now(), erro: e.message }); }
   queueRender();
 }
@@ -95,7 +100,7 @@ function viewLista(c, d) {
             <td>${badge(k.status)}</td></tr>`; }).join('')}
       </tbody></table></div>`
     : `<div class="card empty"><p>Nenhum contrato de mão de obra nesta obra.</p>${podeContratar() ? `<button class="btn primary" data-act="ctrNovo">${I.plus} Criar o primeiro</button>` : ''}</div>`}
-    <div class="muted small">Profissionais vêm do cadastro de Medições › Profissionais. Contrato por medição é pago pelos boletins (% do serviço); mensal e em parcelas, pelas parcelas lançadas no Financeiro.</div>
+    <div class="muted small">Profissionais vêm do cadastro de Medições › Profissionais. Contrato por medição é medido na aba Medições (planilha por % ou por ambiente, retenção e pagamentos); mensal e em parcelas, pelas parcelas lançadas no Financeiro.</div>
   </div>`;
 }
 
@@ -119,7 +124,7 @@ function viewContrato(c, d, id) {
       ${rascunho && podeContratar() ? `<button class="btn" data-act="ctrEditar" data-id="${k.id}">Editar</button><button class="btn primary" data-act="ctrAtivar" data-id="${k.id}">Ativar contrato</button><button class="btn danger" data-act="ctrExcluir" data-id="${k.id}">Excluir rascunho</button>` : ''}
       ${k.status === 'vigente' && podeContratar() ? `<button class="btn" data-act="ctrEncerrar" data-id="${k.id}">Encerrar</button>` : ''}</div></div>
   <div class="stack">
-    ${rascunho ? '<div class="alert info small">Rascunho: confira os dados e as parcelas e clique em <b>Ativar contrato</b>. Ao ativar, o valor entra no Financeiro como compromisso (Contrato · Mão de obra) e, se for por medição, o profissional passa a poder ser medido nos boletins com este valor.</div>' : ''}
+    ${rascunho ? '<div class="alert info small">Rascunho: confira os dados e as parcelas e clique em <b>Ativar contrato</b>. Ao ativar, o valor entra no Financeiro como compromisso (Contrato · Mão de obra) e, se for por medição, o engenheiro responsável passa a lançar as medições na aba Medições (a planilha pode ser montada antes).</div>' : ''}
     ${k.close_reason ? `<div class="alert ${k.status === 'rescindido' ? 'err' : 'info'} small">${esc(STATUS_CONTRATO[k.status].rotulo)}: ${esc(k.close_reason)}</div>` : ''}
     <div class="card card-pad"><div class="ficha-campos">
       ${campo('Valor', k.amount == null ? '' : fmtBRL(k.amount))}${campo('Forma de pagamento', esc(FORMAS_PAGAMENTO[k.payment_mode]))}
@@ -137,9 +142,9 @@ function viewContrato(c, d, id) {
             <td>${k.status === 'vigente' && !p.expense_id && podeLancar() ? `<button class="btn sm primary" data-act="ctrLancar" data-id="${p.id}" data-k="${k.id}">Lançar no Financeiro</button>` : ''}</td></tr>`; }).join('')}
         </tbody><tfoot><tr><th colspan="2">Total</th><th class="num nowrap">${fmtBRL(ps.reduce((s, p) => s + Number(p.amount), 0))}</th><th colspan="2">${Math.abs(ps.reduce((s, p) => s + Number(p.amount), 0) - Number(k.amount || 0)) > 0.01 ? '<span class="badge crit">diferente do valor do contrato</span>' : ''}</th></tr></tfoot></table></div>`
         : '<div class="muted small">Sem parcelas ainda. Use "Gerar parcelas" (valor dividido igualmente, uma por mês) e ajuste datas e valores se precisar.</div>'}</div>` : ''}
-    ${k.payment_mode === 'medicao' ? `<div class="card card-pad stack"><h2 style="margin:0">Medições</h2>
-      <div class="muted small">Pago pelos boletins de medição: em cada boletim, informe o % do serviço executado por ${esc(w?.name || 'este profissional')}; o valor é o % × ${k.amount == null ? 'valor do contrato' : fmtBRL(k.amount)}. ${k.status === 'vigente' ? `<a href="#/obra/${o.id}/medicoes">Abrir Medições</a>` : 'Disponível depois de ativar.'}</div>
-      ${medicoes.length ? `<ul class="lista">${medicoes.map((x) => `<li class="row between"><span class="small">${esc(x.documento)} — ${esc(x.descricao || '')}</span><b class="nowrap">${fmtBRL(x.valor)}</b></li>`).join('')}</ul>` : '<div class="muted small">Nenhuma medição lançada ainda.</div>'}</div>` : ''}
+    ${k.payment_mode === 'medicao' ? `<div class="card card-pad stack"><div class="row between"><h2 style="margin:0">Medição</h2><a class="btn sm primary" href="#/obra/${o.id}/medicoes/contrato/${k.id}">Abrir a planilha de medição</a></div>
+      <div class="muted small">${esc(FORMAS_MEDICAO[k.measure_mode]?.rotulo || 'Por porcentagem')} · retenção ${fmtNum(Number(k.retention_pct ?? 5), 2)}% · responsável: <b>${esc(k.responsible_label || 'não definido')}</b>. Planilha, medições, aditivos, glosas e pagamentos ficam em Medições; os pagamentos entram aqui no Financeiro.</div>
+      ${medicoes.length ? `<div class="muted small">Boletins antigos lançados para este contrato:</div><ul class="lista">${medicoes.map((x) => `<li class="row between"><span class="small">${esc(x.documento)} — ${esc(x.descricao || '')}</span><b class="nowrap">${fmtBRL(x.valor)}</b></li>`).join('')}</ul>` : ''}</div>` : ''}
     <div class="card card-pad stack"><h2 style="margin:0">Contrato assinado</h2>
       ${k.file_path ? `<div class="row" style="gap:8px"><button class="btn sm" data-act="ctrArquivoAbrir" data-id="${k.id}">${esc(k.file_name || 'Abrir contrato')}</button></div>` : '<div class="muted small">Nenhum arquivo anexado.</div>'}
       ${podeContratar() ? `<div><label class="btn sm">${I.upload} ${k.file_path ? 'Trocar arquivo' : 'Anexar contrato (PDF ou Word)'}<input type="file" accept="${ACCEPT}" data-chg="ctrArquivo" data-id="${k.id}" hidden></label></div>` : ''}
@@ -155,6 +160,9 @@ async function formulario(o, k = null, faseInicial = '') {
   if (!ativos.length) return info('Cadastre o profissional', '<p>O contrato é com um profissional, empresa ou equipe do cadastro. Cadastre em <b>Medições › Profissionais</b> e volte aqui.</p>');
   const raizes = (o.eap || []).filter((a) => !a.parentId);
   const marcadas = new Set(k ? k.phase_ids || [] : faseInicial ? [faseInicial] : []);
+  // engenheiro responsável (só ele lança medições e pagamentos do contrato por medição) — admin ou engenheiro da empresa
+  const engs = (await listarMembros(ctx().orgId).catch(() => [])).filter((m) => ['admin', 'engenheiro'].includes(m.role));
+  const respPadrao = k?.responsible_id || (engs.some((m) => m.user_id === ctx().userId) ? ctx().userId : engs[0]?.user_id || '');
   const v = await formDialog({ title: k ? `Editar ${numeroContrato(k.number)}` : 'Novo contrato de mão de obra', ok: k ? 'Salvar' : 'Criar rascunho',
     text: 'O contrato nasce como rascunho; ao ativar, entra no Financeiro.',
     fields: [
@@ -163,6 +171,11 @@ async function formulario(o, k = null, faseInicial = '') {
       { name: 'scope', label: 'Escopo detalhado', type: 'textarea', value: k?.scope || '' },
       { name: 'amount', label: 'Valor total (R$)', value: k?.amount == null ? '' : fmtIn(k.amount, 2), hint: 'Obrigatório, exceto no pagamento avulso.' },
       { name: 'mode', label: 'Forma de pagamento', type: 'select', value: k?.payment_mode || 'medicao', options: Object.entries(FORMAS_PAGAMENTO).map(([value, label]) => ({ value, label })) },
+      { name: 'medida', label: 'Como medir (pagamento por medição)', type: 'select', value: k?.measure_mode || 'percentual',
+        options: Object.entries(FORMAS_MEDICAO).map(([value, f]) => ({ value, label: `${f.rotulo} — ${f.texto}` })), hint: 'Padrão: por porcentagem. Pode ser trocada até a primeira medição.' },
+      { name: 'retencao', label: 'Retenção por medição (%)', value: fmtIn(k?.retention_pct ?? 5, 2), hint: 'Padrão 5%, devolvida com o último pagamento.' },
+      ...(engs.length && (!k || k.status === 'rascunho') ? [{ name: 'resp', label: 'Engenheiro responsável', type: 'select', value: respPadrao,
+        options: engs.map((m) => ({ value: m.user_id, label: `${m.nome || m.email} (${m.role})` })), hint: 'Só ele lança medições e pagamentos deste contrato.' }] : []),
       { name: 'start', label: 'Início', type: 'date', value: k?.start_date || '' },
       { name: 'end', label: 'Término previsto', type: 'date', value: k?.end_date || '' },
       { name: 'notes', label: 'Observações', type: 'textarea', value: k?.notes || '' },
@@ -173,8 +186,14 @@ async function formulario(o, k = null, faseInicial = '') {
   if (v.amount.trim() && !(valor >= 0)) throw new Error('Valor inválido.');
   if (v.mode !== 'avulso' && valor == null) throw new Error('Informe o valor do contrato.');
   if (v.start && v.end && v.end < v.start) throw new Error('O término é antes do início.');
+  const ret = parseNum(v.retencao);
+  if (!(ret >= 0 && ret <= 30)) throw new Error('Retenção entre 0% e 30%.');
   const dados = { worker_id: v.worker, title: v.title.trim(), scope: v.scope.trim(), amount: valor, payment_mode: v.mode, start_date: v.start || null,
     end_date: v.end || null, notes: v.notes.trim(), phase_ids: raizes.filter((a) => v[`f_${a.id}`]).map((a) => a.id) };
+  // forma de medição e retenção só mudam até a 1ª medição (o banco confere); responsável só no rascunho por aqui
+  if (!k || k.measure_mode !== v.medida) dados.measure_mode = v.medida;
+  if (!k || Number(k.retention_pct) !== ret) dados.retention_pct = ret;
+  if (v.resp && (!k || k.responsible_id !== v.resp)) dados.responsible_id = v.resp;
   const c = await sb();
   await nuvem.enviar().catch(() => {});   // a EAP precisa estar no banco (fases do escopo)
   if (k) { ok(await c.from('labor_contracts').update(dados).eq('id', k.id), 'contrato'); await carregar(o.id, true); return k.id; }
@@ -197,12 +216,12 @@ async function gerar(o, k) {
 }
 
 /* ---------- ações ---------- */
-const obraAtual = () => store.obra(location.hash.split('/')[2]);
+const obraAtual = () => store.obra(idObraDaRota());
 const contrato = (o, id) => dadosObra(o.id)?.contratos.find((x) => x.id === id);
 
 export const acoesContratos = {
-  async ctrNovo(d) { const o = obraAtual(); const id = await formulario(o, null, d.fase || ''); if (id) location.hash = `#/obra/${o.id}/contratos/${id}`; },
-  ctrAbrir(d) { location.hash = `#/obra/${obraAtual().id}/contratos/${d.id}`; },
+  async ctrNovo(d) { const o = obraAtual(); const id = await formulario(o, null, d.fase || ''); if (id) location.hash = noModulo(`#/obra/${o.id}/contratos/${id}`); },
+  ctrAbrir(d) { location.hash = noModulo(`#/obra/${obraAtual().id}/contratos/${d.id}`); },
   async ctrAtualizar() { await carregar(obraAtual().id, true); },
   async ctrEditar(d) { const o = obraAtual(); await formulario(o, contrato(o, d.id)); },
   async ctrGerarParcelas(d) { const o = obraAtual(); await gerar(o, contrato(o, d.id)); },
@@ -237,7 +256,7 @@ export const acoesContratos = {
     if (!(await ask(`Excluir o rascunho ${numeroContrato(k.number)}? (Fica registrado na auditoria.)`, 'Excluir'))) return;
     ok(await (await sb()).from('labor_contracts').update({ deleted_at: new Date().toISOString() }).eq('id', k.id), 'contrato');
     await carregar(o.id, true);
-    location.hash = `#/obra/${o.id}/contratos`;
+    location.hash = noModulo(`#/obra/${o.id}/contratos`);
   },
   async ctrArquivoAbrir(d) {
     const k = contrato(obraAtual(), d.id);

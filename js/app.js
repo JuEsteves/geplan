@@ -3,8 +3,8 @@ import * as store from './store.js';
 import * as drive from './drive.js';
 import { ALLOWED_EMAIL_HASHES } from './config.js';
 import { todayISO } from './schedule.js';
-import { esc, ui, toast, ask, setRenderer, queueRender } from './ui.js';
-import { viewObra, acoesObra, mudancasObra, entradasObra, depoisObra } from './obra.js';
+import { esc, ui, toast, ask, setRenderer, queueRender, lembrarAberto } from './ui.js';
+import { viewObra, acoesObra, mudancasObra, entradasObra, depoisObra, viewModuloObras, obraPadraoDoModulo, entradasModulo } from './obra.js';
 import { viewObras, viewComposicoes, viewImportar, acoesBiblioteca, mudancasBiblioteca, entradasBiblioteca } from './biblioteca.js';
 import { viewFases, acoesFases, mudancasFases, entradasFases } from './fases.js';
 import { acoesGestao, mudancasGestao } from './gestao.js';
@@ -23,6 +23,7 @@ import { viewDiario, acoesDiario, mudancasDiario, entradasDiario, depoisDiario, 
 import { viewMedicoes, acoesMedicoes, mudancasMedicoes, entradasMedicoes, limparMedicoes } from './medicoes.js';
 import { viewBases, acoesBases, mudancasBases, entradasBases, limparBases } from './basesRef.js';
 import { acoesContratos, mudancasContratos, limparContratos } from './contratos.js';
+import { viewPagamentos, acoesMedicao, mudancasMedicao, limparMedicao } from './medicao.js';
 
 // Modo nuvem (Supabase) quando js/config.js tiver URL e chave; senão, modo Google Drive (como antes).
 const NUVEM = nuvemConfigurada();
@@ -210,7 +211,7 @@ async function sairNuvem() {
   if (nuvem.pendente()) await nuvem.enviar().catch(() => {});
   if (nuvem.pendente() && !(await ask('Há alterações que ainda NÃO foram enviadas para a nuvem e serão perdidas. Sair mesmo assim?', 'Sair'))) return;
   await conta.sair().catch(() => {});
-  nuvem.encerrar(); store.clearLocal(); limparEmpresa(); limparFornecedores(); limparSuprimentos(); limparDiario(); limparMedicoes(); limparBases(); limparContratos();
+  nuvem.encerrar(); store.clearLocal(); limparEmpresa(); limparFornecedores(); limparSuprimentos(); limparDiario(); limparMedicoes(); limparBases(); limparContratos(); limparMedicao();
   sessaoAtual = null; authorized = false;
   location.hash = '#/inicio';
   renderGateNuvem('entrar');
@@ -220,7 +221,7 @@ window.addEventListener('geplan:aviso', (e) => toast(e.detail, 7000));
 window.addEventListener('geplan:trocar-empresa', async (e) => {
   await nuvem.enviar().catch(() => {});
   if (nuvem.pendente() && !(await ask('Há alterações não enviadas nesta empresa. Trocar mesmo assim (elas serão perdidas)?', 'Trocar'))) return queueRender();
-  nuvem.encerrar(); store.clearLocal(); limparFornecedores(); limparSuprimentos(); limparDiario(); limparMedicoes(); limparBases(); limparContratos();
+  nuvem.encerrar(); store.clearLocal(); limparFornecedores(); limparSuprimentos(); limparDiario(); limparMedicoes(); limparBases(); limparContratos(); limparMedicao();
   location.hash = '#/inicio';
   await entrarNaEmpresa(e.detail);
 });
@@ -232,10 +233,11 @@ function parseRoute() {
   if (parts[0] === 'convite' && parts[1]) return { name: 'convite', token: parts[1] };
   if (parts[0] === 'obra' && parts[1]) return { name: 'obra', id: parts[1], tab: parts[2] || 'painel', sub: parts[3] || '', resto: parts.slice(3) };
   if (parts[0] === 'fases') return { name: 'fases', id: parts[1] };
-  if (parts[0] === 'modulo' && parts[1]) return { name: 'modulo', modulo: parts[1] };
+  if (parts[0] === 'modulo' && parts[1]) return { name: 'modulo', modulo: parts[1], obra: parts[2] || '', resto: parts.slice(3) };
   if (parts[0] === 'bases') return { name: 'bases', base: parts[1] || '', codigo: parts[2] || '' };
   if (parts[0] === 'fornecedores') return parts[1] ? { name: 'fornecedor', id: parts[1] } : { name: 'fornecedores' };
   if (parts[0] === 'medicoes') return { name: 'medicoes', secao: parts[1] || 'boletins', id: parts[2] || '' };
+  if (parts[0] === 'pagamentos') return { name: 'pagamentos', secao: parts[1] || 'semana' };
   if (parts[0] === 'diario') return { name: 'diario', obra: parts[1] || '', secao: parts[2] || 'geral', id: parts[3] || '', modo: parts[4] || '' };
   if (parts[0] === 'suprimentos') {
     if (parts[1] === 'pedido' && parts[2]) return { name: 'suprimentos', secao: 'pedido', id: parts[2], aba: parts[3] || 'resumo' };
@@ -266,12 +268,12 @@ function render() {
   const scrollGantt = document.getElementById('gantt')?.scrollLeft;
   const scrollTree = document.querySelector('.tree-wrap')?.scrollLeft;
 
-  // módulos por obra: com uma obra só, abre direto nela
-  if (route.name === 'modulo' && MODULOS[route.modulo]) {
-    const unica = obraUnica();
-    if (unica) { history.replaceState(null, '', location.pathname + location.search + linkModulo(unica, MODULOS[route.modulo])); return render(); }
+  // módulos por obra: faixa com as obras e, embaixo, só a obra escolhida (sem escolha: a última aberta ou a primeira)
+  if (route.name === 'modulo' && MODULOS[route.modulo] && (!route.obra || !store.obra(route.obra))) {
+    const padrao = obraPadraoDoModulo();
+    if (padrao) { history.replaceState(null, '', `${location.pathname}${location.search}#/modulo/${route.modulo}/${padrao.id}`); return render(); }
   }
-  if (route.name === 'obra') { try { localStorage.setItem('planobras:ultimaObra', route.id); } catch {} }
+  if (route.name === 'obra' || (route.name === 'modulo' && route.obra)) { try { localStorage.setItem('planobras:ultimaObra', route.id || route.obra); } catch {} }
   renderMenu(route);
   document.body.classList.remove('menu-aberto');
 
@@ -284,7 +286,8 @@ function render() {
   else if (route.name === 'suprimentos') html = viewSuprimentos(route);
   else if (route.name === 'diario') html = viewDiario(route);
   else if (route.name === 'medicoes') html = viewMedicoes(route);
-  else if (route.name === 'modulo') html = viewModulo(route, resumoDe);
+  else if (route.name === 'pagamentos') html = viewPagamentos(route);
+  else if (route.name === 'modulo') html = route.obra && MODULOS[route.modulo] ? viewModuloObras(route, resumoDe) : viewModulo(route, resumoDe);
   else if (route.name === 'obra') html = viewObra(route);
   else if (route.name === 'composicoes') html = viewComposicoes();
   else if (route.name === 'sinapi') html = viewSinapi();
@@ -296,7 +299,7 @@ function render() {
   $view.innerHTML = html;
 
   // "Compras e materiais" abre o Financeiro da obra já na seção de pedidos (só ao chegar na rota)
-  if (route.sub === 'compras' && ultimoHash !== location.hash) setTimeout(() => document.getElementById('secao-compras')?.scrollIntoView({ block: 'start' }));
+  if ((route.sub === 'compras' || (route.name === 'modulo' && route.modulo === 'compras')) && ultimoHash !== location.hash) setTimeout(() => document.getElementById('secao-compras')?.scrollIntoView({ block: 'start' }));
   ultimoHash = location.hash;
   if (focusKey) {
     const el = $view.querySelector(`[data-key="${CSS.escape(focusKey)}"]`);
@@ -310,6 +313,7 @@ function render() {
   const tw = document.querySelector('.tree-wrap');
   if (tw && scrollTree) tw.scrollLeft = scrollTree;
   if (route.name === 'obra') depoisObra(route, scrollGantt);
+  if (route.name === 'modulo' && route.obra && MODULOS[route.modulo]) depoisObra({ id: route.obra, tab: MODULOS[route.modulo].aba }, scrollGantt);
   if (route.name === 'sinapi') depoisSinapi();
   if (route.name === 'diario' || (route.name === 'obra' && route.tab === 'diario')) depoisDiario();
 }
@@ -401,10 +405,30 @@ const mudancasGerais = {
 };
 
 /* ---------- eventos ---------- */
-const acoes = { ...acoesGerais, ...acoesBiblioteca, ...acoesObra, ...acoesFases, ...acoesSinapi, ...acoesGestao, ...acoesEmpresa, ...acoesFornecedores, ...acoesSuprimentos, ...acoesDiario, ...acoesMedicoes, ...acoesBases, ...acoesContratos };
-const mudancas = { ...mudancasGerais, ...mudancasBiblioteca, ...mudancasObra, ...mudancasFases, ...mudancasSinapi, ...mudancasGestao, ...mudancasEmpresa, ...mudancasInicio, ...mudancasFornecedores, ...mudancasSuprimentos, ...mudancasDiario, ...mudancasMedicoes, ...mudancasBases, ...mudancasContratos };
-const entradas = { ...entradasBiblioteca, ...entradasObra, ...entradasFases, ...entradasSinapi, ...entradasInicio, ...entradasFornecedores, ...entradasSuprimentos, ...entradasDiario, ...entradasMedicoes, ...entradasBases };
+const acoes = { ...acoesGerais, ...acoesBiblioteca, ...acoesObra, ...acoesFases, ...acoesSinapi, ...acoesGestao, ...acoesEmpresa, ...acoesFornecedores, ...acoesSuprimentos, ...acoesDiario, ...acoesMedicoes, ...acoesBases, ...acoesContratos, ...acoesMedicao };
+const mudancas = { ...mudancasGerais, ...mudancasBiblioteca, ...mudancasObra, ...mudancasFases, ...mudancasSinapi, ...mudancasGestao, ...mudancasEmpresa, ...mudancasInicio, ...mudancasFornecedores, ...mudancasSuprimentos, ...mudancasDiario, ...mudancasMedicoes, ...mudancasBases, ...mudancasContratos, ...mudancasMedicao };
+const entradas = { ...entradasBiblioteca, ...entradasObra, ...entradasModulo, ...entradasFases, ...entradasSinapi, ...entradasInicio, ...entradasFornecedores, ...entradasSuprimentos, ...entradasDiario, ...entradasMedicoes, ...entradasBases };
 
+// seções recolhíveis e grupos do menu: lembra aberto/fechado (preferência de tela, só neste navegador)
+// só grava quando a pessoa clicou no título (o "open" vindo do desenho da tela também dispara "toggle")
+let clicado = null;
+document.addEventListener('click', (e) => {
+  const s = e.target.closest?.('details[data-secao] > summary');
+  clicado = s && !e.target.closest('.secao-acoes') ? s.parentElement : null;
+}, true);
+const lembrarSecao = (e) => {
+  const d = e.target;
+  if (d === clicado && d.matches('details[data-secao]')) { lembrarAberto(d.dataset.secao, d.open); clicado = null; }
+};
+$view.addEventListener('toggle', lembrarSecao, true);
+document.getElementById('sidenav').addEventListener('toggle', lembrarSecao, true);
+// botões/links no cabeçalho de uma seção não abrem/fecham a seção
+$view.addEventListener('click', (e) => {
+  if (!e.target.closest('summary .secao-acoes')) return;
+  e.preventDefault();
+  const a = e.target.closest('a[href]');
+  if (a && !a.dataset.act && a.getAttribute('href').startsWith('#/')) location.hash = a.getAttribute('href');
+}, true);
 $view.addEventListener('click', (e) => {
   const el = e.target.closest('[data-act]');
   if (!el || el.disabled) return;

@@ -1,7 +1,7 @@
 // Visão geral (página inicial) e Tarefas e pendências: consolidam as obras usando os mesmos cálculos das
 // telas de cada obra (contexto → indicadores.js). Nenhum dado de demonstração: sem dados, mostra estado vazio.
 import * as store from './store.js';
-import { esc, I, ui, queueRender } from './ui.js';
+import { esc, I, ui, queueRender, secao, ajuda } from './ui.js';
 import { fmtBR, isoBR, fmtNum, fmtBRL, todayDay } from './schedule.js';
 import { contexto } from './obra.js';
 import { resumoObra, consolidado } from './indicadores.js';
@@ -27,30 +27,33 @@ const SITUACAO = { 'Em dia': 'good', 'Atenção': 'warn', 'Atrasada': 'crit', 'C
 const lista = (itens, vazio) => (itens.length ? `<ul class="lista">${itens.join('')}</ul>` : `<div class="muted small" style="padding:6px 0">${vazio}</div>`);
 const barra = (plan, real) => `<div class="progress duo" title="planejado ${fmtNum(plan, 0)}% · realizado ${fmtNum(real, 0)}%"><div class="p" style="width:${Math.min(100, plan)}%"></div><div class="r" style="width:${Math.min(100, real)}%"></div></div>`;
 /** Card de indicador; vira link quando há uma tela de destino. */
-const kpi = (titulo, valor, sub, href = '', cor = '') => {
-  const corpo = `<div class="k-label">${titulo}</div><div class="k-value"${cor ? ` style="color:${cor}"` : ''}>${valor}</div><div class="k-sub">${sub}</div>`;
-  return href ? `<a class="card kpi kpi-link" href="${href}">${corpo}</a>` : `<div class="card kpi">${corpo}</div>`;
+const kpi = (titulo, valor, sub, href = '', cor = '', area = '', ico = '') => {
+  const corpo = `<div class="k-topo">${ico ? `<span class="k-ico">${ICONES[ico]}</span>` : ''}<div class="k-label">${titulo}</div></div><div class="k-value"${cor ? ` style="color:${cor}"` : ''}>${valor}</div><div class="k-sub">${sub}</div>`;
+  const attrs = `class="card kpi kpi-area${href ? ' kpi-link' : ''}"${area ? ` data-area="${area}"` : ''}`;
+  return href ? `<a ${attrs} href="${href}">${corpo}</a>` : `<div ${attrs}>${corpo}</div>`;
 };
 
 /* ---------- módulos (atalhos e apresentação) ---------- */
 // `href` = tela real; sem `href` = ainda em desenvolvimento (aparece desabilitado, sem simular funcionamento).
 const MODULOS = [
-  { grupo: 'Planejamento', itens: [
+  { grupo: 'Planejamento', area: 'plan', itens: [
     { r: 'Obras', ico: 'obras', href: '#/obras', d: 'Cadastro das obras, cliente, prazos, calendário e equipe.' },
     { r: 'EAP e fases', ico: 'fases', href: '#/fases', d: 'Biblioteca de fases (modelos de EAP) para montar obras.' },
     { r: 'Cronograma', ico: 'gantt', href: '#/modulo/gantt', d: 'Gantt, dependências, caminho crítico e linha de base.' },
     { r: 'Curva S', ico: 'curva', href: '#/modulo/curva', d: 'Planejado × realizado, físico e financeiro.' },
   ] },
-  { grupo: 'Orçamento e custos', itens: [
+  { grupo: 'Orçamentos e custos', area: 'orc', itens: [
     { r: 'Orçamentos', ico: 'orcamento', href: '#/modulo/orcamento', d: 'Itens, composições, BDI, revisões e importação do Excel.' },
-    { r: 'Medições', ico: 'medicoes', href: nuvemConfigurada() ? '#/medicoes' : '#/modulo/medicoes', d: nuvemConfigurada() ? 'Boletins por atividade e profissional, aprovação e pagamento.' : 'Avanço físico acumulado de cada atividade.' },
+    { r: 'Medições', ico: 'medicoes', href: '#/modulo/medicoes', d: nuvemConfigurada() ? 'Medição dos contratos: planilha por % ou por ambiente, retenção e pagamentos.' : 'Avanço físico acumulado de cada atividade.' },
+    ...(nuvemConfigurada() ? [{ r: 'Pagamentos', ico: 'custos', href: '#/pagamentos', d: 'Pagamento da sexta-feira, por profissional, balanço das obras e PIX.' }] : []),
     { r: 'Custos', ico: 'custos', href: '#/modulo/financeiro', d: 'Contratos, despesas e pagamentos sem duplicidade.' },
   ] },
-  { grupo: 'Execução', itens: [
+  { grupo: 'Execução e controle', area: 'exec', itens: [
     { r: 'Diário de obra', ico: 'diario', href: '#/diario', d: 'RDO por período, fotos e vídeos, aprovação com assinatura e PDF.' },
+    ...(nuvemConfigurada() ? [{ r: 'Contratos', ico: 'tarefas', href: '#/modulo/contratos', d: 'Empreiteiros e prestadores: escopo, valor, parcelas e prazo.' }] : []),
     { r: 'Tarefas e pendências', ico: 'tarefas', href: '#/pendencias', d: 'Atrasos e pendências de todas as obras.' },
   ] },
-  { grupo: 'Suprimentos e documentos', itens: [
+  { grupo: 'Suprimentos e documentos', area: 'sup', itens: [
     ...(nuvemConfigurada() ? [
       { r: 'Quadro de compras', ico: 'compras', href: '#/suprimentos', d: 'Pedidos com grupos de materiais, cotações e compras, por etapa.' },
       { r: 'Entregas', ico: 'entregas', href: '#/suprimentos/entregas', d: 'Grupos comprados aguardando entrega ou retirada na obra.' },
@@ -61,8 +64,8 @@ const MODULOS = [
   ] },
 ];
 function atalhos(comDescricao = false) {
-  return MODULOS.map((g) => `<div class="atalhos-grupo"><div class="nav-titulo">${esc(g.grupo)}</div><div class="atalhos">${g.itens.map((m) => {
-    const corpo = `${ICONES[m.ico]}<span><b>${esc(m.r)}</b>${comDescricao ? `<small>${esc(m.d)}</small>` : ''}</span>${m.href ? '' : '<span class="badge">em desenvolvimento</span>'}`;
+  return MODULOS.map((g) => `<div class="atalhos-grupo" data-area="${g.area}"><div class="atalhos-titulo">${esc(g.grupo)}</div><div class="atalhos">${g.itens.map((m) => {
+    const corpo = `<span class="atalho-ico">${ICONES[m.ico]}</span><span><b>${esc(m.r)}</b>${comDescricao ? `<small>${esc(m.d)}</small>` : m.href ? '' : '<small>em desenvolvimento</small>'}</span>${m.href || !comDescricao ? '' : '<span class="badge">em desenvolvimento</span>'}`;
     return m.href ? `<a class="atalho${comDescricao ? ' atalho-desc' : ''}" href="${m.href}">${corpo}</a>`
       : `<span class="atalho atalho-off${comDescricao ? ' atalho-desc' : ''}" aria-disabled="true" title="Em desenvolvimento">${corpo}</span>`;
   }).join('')}</div></div>`).join('');
@@ -118,7 +121,7 @@ function secoes(rs, limite) {
   const pedido = (k) => esc(k.objeto || k.numero || k.fornecedor || 'Pedido');
   const card = (titulo, n, corpo, vazio, extra = '') => ({ n, html: `<div class="card card-pad"><h2>${titulo}${n != null ? ` (${n})` : ''}</h2>${lista(corpo, vazio)}${extra}</div>` });
   return {
-    atrasadas: card('Atividades atrasadas', atrasadas.length, corta(atrasadas).map(({ r, n }) => `<li><a href="#/obra/${r.o.id}/medicoes"><b>${esc(n.a.codigo)}</b> ${esc(n.a.descricao)}</a> ${nomeObra(r)}</li>`),
+    atrasadas: card('Atividades atrasadas', atrasadas.length, corta(atrasadas).map(({ r, n }) => `<li><a href="#/obra/${r.o.id}/medicoes/avanco"><b>${esc(n.a.codigo)}</b> ${esc(n.a.descricao)}</a> ${nomeObra(r)}</li>`),
       ativas.some((r) => r.temEap) ? 'Nenhuma atividade atrasada pelas medições registradas.' : 'Sem atividades cadastradas.', mais(atrasadas.length)),
     entregas: card('Entregas atrasadas e próximas (7 dias)', entregas.length, corta(entregas).map(({ r, k, atraso }) => `<li><a href="#/obra/${r.o.id}/financeiro/compras">${pedido(k)}</a> <span class="badge ${atraso ? 'crit' : 'warn'}">${atraso ? 'atrasada desde' : 'prevista para'} ${isoBR(k.dataNecessaria)}</span> ${nomeObra(r)}</li>`),
       'Nenhuma entrega atrasada ou prevista para os próximos 7 dias.'),
@@ -182,32 +185,37 @@ export function viewInicio() {
   const mostrar = filtrando ? filtradas : filtradas.slice(0, 6);
   // painel de atenção: só os quadros com algo a mostrar
   const alertas = [s.atrasadas, s.entregas, s.cotacao, s.diario, s.atencao].filter((x) => x.n);
+  const obrasCorpo = `<div class="row filtros-obras">
+      <input data-inp="inicioBusca" data-key="inicioBusca" value="${esc(ui.inicioBusca || '')}" placeholder="Buscar por nome, código, cliente ou cidade…" style="flex:1;min-width:220px">
+      <select data-chg="inicioStatus" style="width:auto;min-width:170px"><option value="">Todos os status</option>${STATUS_OBRA.map((x) => `<option ${x === ui.inicioStatus ? 'selected' : ''}>${x}</option>`).join('')}</select>
+      <select data-chg="inicioSituacao" style="width:auto;min-width:180px"><option value="">Todas as situações</option>${Object.keys(SITUACAO).map((x) => `<option ${x === ui.inicioSituacao ? 'selected' : ''}>${x}</option>`).join('')}</select>
+    </div>
+    ${mostrar.length ? `<div class="obras-grid">${mostrar.map(cardObra).join('')}</div>${!filtrando && filtradas.length > 6 ? `<a class="small" href="#/obras">+ ${filtradas.length - 6} obra(s) — ver todas →</a>` : ''}`
+      : '<div class="card empty"><p>Nenhuma obra encontrada com esses filtros.</p></div>'}`;
+  // coluna da direita: resumo do que pede atenção (só dados reais; vazio = nada a mostrar)
+  const lateral = `<aside class="lateral">
+      <div class="lateral-titulo">Painel de atenção ${ajuda('Itens das obras ativas que pedem ação: atividades e entregas atrasadas, pedidos em cotação, pendências do diário e obras com alerta. Lista completa em Tarefas e pendências.')}</div>
+      ${alertas.length ? alertas.map((x) => x.html).join('') : '<div class="card card-pad muted small">Nada exige atenção agora: sem atividades ou entregas atrasadas, pedidos em cotação ou pendências no diário.</div>'}
+      <a class="btn sm" href="#/pendencias" style="width:100%">Ver todas as pendências</a>
+    </aside>`;
   return `${cabecalho()}
   <div class="stack">
     <div class="kpis kpis-6">
-      ${kpi('Obras ativas', k.ativas, `de ${k.total} cadastrada(s) · sem concluídas e canceladas`, '#/obras')}
-      ${kpi('Avanço físico médio', k.avancoMedio == null ? '—' : `${fmtNum(k.avancoMedio, 1)}%`, k.avancoMedio == null ? 'nenhuma obra ativa com avanço calculável' : `média simples de ${k.obrasNoAvanco} obra(s) ativa(s)`, '#/modulo/painel')}
-      ${kpi('Atividades atrasadas', k.atrasadas, `${k.pendencias} pendência(s) em aberto no diário`, '#/pendencias', k.atrasadas ? 'var(--crit)' : '')}
-      ${custos ? kpi('Custo realizado', k.custoRealizado == null ? '—' : fmtBRL(k.custoRealizado), k.custoRealizado == null ? 'nenhuma despesa lançada' : `soma das despesas de ${k.obrasComDespesas} obra(s)`, '#/modulo/financeiro') : ''}
-      ${kpi('Pedidos em andamento', k.temPedidos ? k.pedidosEmAndamento : '—', k.temPedidos ? 'em cotação, aprovados ou entregues em parte' : 'nenhum pedido de compra registrado', '#/modulo/compras')}
-      ${kpi('Entregas pendentes', k.temPedidos ? k.entregasPendentes : '—', k.temPedidos ? `${k.entregasAtrasadas} atrasada(s) pela data necessária` : 'nenhum pedido de compra registrado', '#/modulo/compras', k.entregasAtrasadas ? 'var(--crit)' : '')}
+      ${kpi('Obras ativas', k.ativas, `de ${k.total} cadastrada(s) · sem concluídas e canceladas`, '#/obras', '', 'visao', 'obras')}
+      ${kpi('Avanço físico médio', k.avancoMedio == null ? '—' : `${fmtNum(k.avancoMedio, 1)}%`, k.avancoMedio == null ? 'nenhuma obra ativa com avanço calculável' : `média simples de ${k.obrasNoAvanco} obra(s) ativa(s)`, '#/modulo/painel', '', 'plan', 'fisico')}
+      ${kpi('Atividades atrasadas', k.atrasadas, `${k.pendencias} pendência(s) em aberto no diário`, '#/pendencias', k.atrasadas ? 'var(--crit)' : '', 'exec', 'tarefas')}
+      ${custos ? kpi('Custo realizado', k.custoRealizado == null ? '—' : fmtBRL(k.custoRealizado), k.custoRealizado == null ? 'nenhuma despesa lançada' : `soma das despesas de ${k.obrasComDespesas} obra(s)`, '#/modulo/financeiro', '', 'orc', 'custos') : ''}
+      ${kpi('Pedidos em andamento', k.temPedidos ? k.pedidosEmAndamento : '—', k.temPedidos ? 'em cotação, aprovados ou entregues em parte' : 'nenhum pedido de compra registrado', '#/modulo/compras', '', 'sup', 'compras')}
+      ${kpi('Entregas pendentes', k.temPedidos ? k.entregasPendentes : '—', k.temPedidos ? `${k.entregasAtrasadas} atrasada(s) pela data necessária` : 'nenhum pedido de compra registrado', '#/modulo/compras', k.entregasAtrasadas ? 'var(--crit)' : '', 'sup', 'entregas')}
     </div>
-
-    <div class="row between" style="flex-wrap:wrap;gap:8px"><h2 style="margin:6px 0 0">Minhas obras</h2><a class="btn sm" href="#/obras">Ver todas as obras</a></div>
-    <div class="row filtros-obras">
-      <input data-inp="inicioBusca" data-key="inicioBusca" value="${esc(ui.inicioBusca || '')}" placeholder="Buscar por nome, código, cliente ou cidade…" style="flex:1;min-width:200px">
-      <select data-chg="inicioStatus" style="width:auto"><option value="">Todos os status</option>${STATUS_OBRA.map((x) => `<option ${x === ui.inicioStatus ? 'selected' : ''}>${x}</option>`).join('')}</select>
-      <select data-chg="inicioSituacao" style="width:auto"><option value="">Todas as situações</option>${Object.keys(SITUACAO).map((x) => `<option ${x === ui.inicioSituacao ? 'selected' : ''}>${x}</option>`).join('')}</select>
+    <div class="com-lateral">
+      <div class="stack">
+        ${secao({ id: 'inicio:atalhos', titulo: 'Acesso rápido', corpo: `<div class="atalhos-areas">${atalhos(false)}</div>`, area: 'visao' })}
+        ${secao({ id: 'inicio:obras', titulo: 'Minhas obras', n: filtradas.length, corpo: obrasCorpo, area: 'plan', acoes: '<a class="btn sm" href="#/obras">Ver todas as obras</a>' })}
+        <div class="muted small">Indicadores calculados hoje (${fmtBR(todayDay())}) com os dados salvos das obras às quais você tem acesso, pelas mesmas regras do painel de cada obra. ${ajuda('Critérios em js/indicadores.js. Nenhum número desta página é estimado ou de demonstração: sem dados, aparece "—".')}</div>
+      </div>
+      ${lateral}
     </div>
-    ${mostrar.length ? `<div class="obras-grid">${mostrar.map(cardObra).join('')}</div>${!filtrando && filtradas.length > 6 ? `<a class="small" href="#/obras">+ ${filtradas.length - 6} obra(s) — ver todas →</a>` : ''}`
-      : '<div class="card empty"><p>Nenhuma obra encontrada com esses filtros.</p></div>'}
-
-    <h2 style="margin:6px 0 0">Painel de atenção</h2>
-    ${alertas.length ? `<div class="grid-2">${alertas.map((x) => x.html).join('')}</div>` : '<div class="card card-pad muted">Nada exige atenção agora: sem atividades ou entregas atrasadas, pedidos em cotação ou pendências no diário.</div>'}
-
-    <h2 style="margin:6px 0 0">Acesso rápido</h2>
-    ${atalhos(false)}
-    <div class="muted small">Indicadores calculados hoje (${fmtBR(todayDay())}) com os dados salvos das obras às quais você tem acesso, pelas mesmas regras do painel de cada obra. Critérios: <code class="k">js/indicadores.js</code>.</div>
   </div>`;
 }
 

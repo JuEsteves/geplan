@@ -2,7 +2,7 @@
 // que vale é o banco (migração 0015: ativar, lançar parcela, encerrar); aqui ficam os cálculos para a tela.
 
 export const FORMAS_PAGAMENTO = {
-  medicao: 'Por medição (boletins)', mensal: 'Mensal', parcelas: 'Em parcelas', avulso: 'Avulso (lançado à mão no Financeiro)',
+  medicao: 'Por medição (planilha de avanço)', mensal: 'Mensal', parcelas: 'Em parcelas', avulso: 'Avulso (lançado à mão no Financeiro)',
 };
 export const STATUS_CONTRATO = {
   rascunho: { rotulo: 'Rascunho', cls: '' }, vigente: { rotulo: 'Vigente', cls: 'good' },

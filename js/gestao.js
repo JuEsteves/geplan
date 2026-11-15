@@ -1,6 +1,7 @@
 // Telas de gestão da obra: Painel (dashboard), Medições, Diário de obra e Financeiro/Suprimentos.
 // Todos os números vêm dos dados salvos da obra e das regras centralizadas (calculo, cpm, curvaS, financeiro, execucao).
 import * as store from './store.js';
+import { idObraDaRota } from './escopo.js';
 import { savedUser } from './drive.js';
 import { uid, registrar, CATEGORIAS_CUSTO, TIPOS_OCORRENCIA } from './model.js';
 import { avanco, fracPlanejada, pctRealAte, incorridoAte } from './curvaS.js';
@@ -15,7 +16,7 @@ import { datalistFornecedores, idDoFornecedorPorNome } from './fornecedores.js';
 import { LIBS, loadScript } from './libs.js';
 
 export const usuario = () => savedUser()?.emailAddress || '';
-const obraAtual = () => store.obra(location.hash.split('/')[2]);
+const obraAtual = () => store.obra(idObraDaRota());
 const folhas = (c) => [...c.cron.nos.values()].filter((n) => n.folha);
 const vazioCard = (txt) => `<div class="card empty"><p>${txt}</p></div>`;
 
@@ -99,7 +100,7 @@ export function tabPainel(c) {
     </div>
     ${custos.alertas.length ? `<div class="alert err">${custos.alertas.map(esc).join('<br>')}</div>` : ''}
     <div class="grid-2">
-      <div class="card card-pad"><h2>Atividades atrasadas (${atrasadas.length})</h2>${lista(atrasadas.slice(0, 8).map((n) => `<li><b>${esc(n.a.codigo)}</b> ${esc(n.a.descricao)} <span class="badge crit">${fmtNum(pctRealAte(o, n.a, hoje), 0)}% de ${fmtNum(fracPlanejada(n, cron.cal, hoje, o) * 100, 0)}%</span></li>`), 'Nenhuma atividade atrasada pelas medições registradas.')}<a class="small" href="#/obra/${o.id}/medicoes">Registrar medições →</a></div>
+      <div class="card card-pad"><h2>Atividades atrasadas (${atrasadas.length})</h2>${lista(atrasadas.slice(0, 8).map((n) => `<li><b>${esc(n.a.codigo)}</b> ${esc(n.a.descricao)} <span class="badge crit">${fmtNum(pctRealAte(o, n.a, hoje), 0)}% de ${fmtNum(fracPlanejada(n, cron.cal, hoje, o) * 100, 0)}%</span></li>`), 'Nenhuma atividade atrasada pelas medições registradas.')}<a class="small" href="#/obra/${o.id}/medicoes/avanco">Registrar avanço físico →</a></div>
       <div class="card card-pad"><h2>Caminho crítico em aberto (${criticas.length})</h2>${lista(criticas.slice(0, 8).map((n) => `<li><b>${esc(n.a.codigo)}</b> ${esc(n.a.descricao)} <span class="muted small">${fmtBR(n.inicio)} → ${fmtBR(n.termino)}</span></li>`), 'Sem atividades críticas em aberto.')}</div>
       <div class="card card-pad"><h2>Próximos marcos</h2>${lista(marcos.map((n) => `<li>${n.a.nivel === 1 ? 'Fim da etapa ' : ''}<b>${esc(n.a.codigo)}</b> ${esc(n.a.descricao)} <span class="muted small">${fmtBR(n.termino)}</span></li>`), 'Nenhum marco à frente.')}</div>
       <div class="card card-pad"><h2>Pendências de execução (${pend.length})</h2>${lista(pend.slice(0, 8).map((p) => `<li><span class="badge warn">${esc(p.tipo)}</span> ${esc(p.descricao)} <span class="muted small">${isoBR(p.data)}</span></li>`), 'Nenhum impedimento/interferência em aberto no diário.')}<a class="small" href="#/obra/${o.id}/diario">Diário de obra →</a></div>

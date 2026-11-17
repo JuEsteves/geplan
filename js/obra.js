@@ -735,6 +735,7 @@ function tabConfig(c) {
         <label class="field">Cidade / UF<input data-chg="obraTexto" data-f="cidade" value="${esc(o.cidade || '')}"></label>
         <label class="field">Engenheiro responsável<input data-chg="obraTexto" data-f="engenheiro" value="${esc(o.engenheiro || '')}"></label>
         <label class="field">CREA/CAU<input data-chg="obraTexto" data-f="crea" value="${esc(o.crea || '')}"></label>
+        <label class="field">CNO (Cadastro Nacional de Obras)<input data-chg="obraTexto" data-f="cno" value="${esc(o.cno || '')}" placeholder="ex.: 90.000.00000/00" maxlength="20"></label>
       </div></div>
     <div class="card card-pad stack"><h2>Cliente</h2>
       <div class="grid-form">
@@ -1162,7 +1163,7 @@ export const acoesObra = {
 
 const ROTULOS_CADASTRO = {
   codigo: 'código', status: 'status', tipoEmpreendimento: 'tipo de empreendimento', endereco: 'endereço', cidade: 'cidade',
-  engenheiro: 'responsável técnico', crea: 'CREA/CAU', terminoPlanejado: 'término planejado', inicioReal: 'início real',
+  engenheiro: 'responsável técnico', crea: 'CREA/CAU', cno: 'CNO', terminoPlanejado: 'término planejado', inicioReal: 'início real',
   'cliente.nome': 'nome', 'cliente.contato': 'contato', 'cliente.telefone': 'telefone', 'cliente.email': 'e-mail',
 };
 

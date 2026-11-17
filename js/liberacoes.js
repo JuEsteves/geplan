@@ -18,6 +18,7 @@ export const LIBERACOES_PADRAO = {
   financeiro: ['solicitar', 'comprar', 'fornecedores'],
   supervisor: ['solicitar', 'receber'],
   cliente: [],
+  contador: [],
 };
 
 /** Liberações efetivas de um membro (mesma regra do banco): admin tem todas; cliente, nenhuma. */

@@ -208,8 +208,79 @@ export function validarItens(itens, { exigirUm = true } = {}) {
     const q = Number(it.quantity);
     if (!(q > 0)) return { erro: `Item ${i + 1} (${desc}): a quantidade precisa ser maior que zero.` };
     if (String(it.unit || '').length > 20) return { erro: `Item ${i + 1}: unidade muito longa.` };
-    ok.push({ description: desc, quantity: q, unit: String(it.unit || '').trim(), spec: String(it.spec || '').trim(), notes: String(it.notes || '').trim() });
+    ok.push({ description: desc, quantity: q, unit: String(it.unit || '').trim(), spec: String(it.spec || '').trim(), notes: String(it.notes || '').trim(),
+      ...(it.tipo !== undefined ? { tipo: String(it.tipo || '') } : {}) });
   }
   if (exigirUm && !ok.length) return { erro: 'Inclua pelo menos um item.' };
   return { itens: ok };
+}
+
+/* ---------- Compras simplificadas (migração 0017) ---------- */
+
+/** Código da ordem de compra: PED-0012-A. */
+export const codigoOC = (numero, letra) => `${numeroPedido(numero)}${letra ? `-${letra}` : ''}`;
+
+/** Pedido em lista → ordens de compra iniciais. Linha com tipo (categoria de fornecedor) vai para a ordem daquele
+ *  tipo, na ordem em que o tipo aparece; linha sem tipo vai para "Diversos" (ou "Itens do pedido", se nenhuma tem tipo).
+ *  `nomeTipo(id)` = nome da categoria. Devolve [{ name, category_id, itens }] com itens sem o campo `tipo`. */
+export function agruparPorTipo(itens, nomeTipo = () => '') {
+  const grupos = new Map();
+  const algumTipo = (itens || []).some((i) => i.tipo);
+  for (const it of itens || []) {
+    const { tipo = '', ...item } = it;
+    const chave = tipo || '';
+    if (!grupos.has(chave)) grupos.set(chave, { name: tipo ? (nomeTipo(tipo) || 'Outros').slice(0, 80) : algumTipo ? 'Diversos' : 'Itens do pedido', category_id: tipo || null, itens: [] });
+    grupos.get(chave).itens.push(item);
+  }
+  // "Diversos" por último
+  return [...grupos.values()].sort((a, b) => (a.category_id ? 0 : 1) - (b.category_id ? 0 : 1));
+}
+
+/** Valor da compra (materiais + frete) × documentos do fornecedor (nota, pedido, recibo).
+ *  situacao: 'sem_documento' · 'confere' (diferença até R$ 0,05) · 'abaixo' (falta documento ou nota parcial) · 'acima'. */
+export function conferirDocumentos(g, docs) {
+  const compra = Math.round(((Number(g?.amount) || 0) + (Number(g?.freight) || 0)) * 100) / 100;
+  const validos = (docs || []).filter((d) => !d.deleted_at);
+  const documentos = Math.round(validos.reduce((s, d) => s + (Number(d.amount) || 0), 0) * 100) / 100;
+  const diferenca = Math.round((documentos - compra) * 100) / 100;
+  const situacao = !validos.length ? 'sem_documento' : Math.abs(diferenca) <= 0.05 ? 'confere' : diferenca < 0 ? 'abaixo' : 'acima';
+  return { compra, documentos, diferenca, situacao, quantidade: validos.length };
+}
+
+/** Soma dos itens com preço (quantidade × preço) e quantos itens estão sem preço. */
+export function somaPrecos(itens) {
+  const lista = itens || [];
+  const comPreco = lista.filter((i) => i.unit_price != null && i.unit_price !== '');
+  return { soma: Math.round(comPreco.reduce((s, i) => s + Number(i.quantity) * Number(i.unit_price), 0) * 100) / 100, semPreco: lista.length - comPreco.length };
+}
+
+/** Histórico de itens comprados de um fornecedor: uma linha por item de ordem comprada (não cancelada) e, por
+ *  material (descrição sem acento/maiúsculas + unidade), a quantidade total, o menor, o maior e o último preço.
+ *  `grupos` = ordens de compra do fornecedor; `itensPorGrupo` = Map(groupId → itens); `obraNome(projectId)`. */
+export function itensDoFornecedor(grupos, itensPorGrupo, obraNome = () => '') {
+  const norm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+  const linhas = [];
+  for (const g of grupos || []) {
+    if (g.deleted_at || g.status === 'cancelado' || !g.contract_id) continue;
+    for (const i of itensPorGrupo.get(g.id) || []) {
+      const preco = i.unit_price == null ? null : Number(i.unit_price);
+      linhas.push({ data: g.purchase_date || '', obra: obraNome(g.project_id), grupoId: g.id, orderId: g.order_id, description: i.description, unit: i.unit || '',
+        quantity: Number(i.quantity), unit_price: preco, total: preco == null ? null : Math.round(Number(i.quantity) * preco * 100) / 100 });
+    }
+  }
+  linhas.sort((a, b) => b.data.localeCompare(a.data) || a.description.localeCompare(b.description));
+  const porMaterial = new Map();
+  for (const l of [...linhas].reverse()) {   // do mais antigo ao mais recente: o último preço fica por último
+    const k = `${norm(l.description)}|${norm(l.unit)}`;
+    if (!porMaterial.has(k)) porMaterial.set(k, { description: l.description, unit: l.unit, quantity: 0, compras: 0, menor: null, maior: null, ultimo: null, ultimaData: '' });
+    const m = porMaterial.get(k);
+    m.quantity += l.quantity; m.compras += 1;
+    if (l.unit_price != null) {
+      m.menor = m.menor == null ? l.unit_price : Math.min(m.menor, l.unit_price);
+      m.maior = m.maior == null ? l.unit_price : Math.max(m.maior, l.unit_price);
+      m.ultimo = l.unit_price; m.ultimaData = l.data;
+    }
+  }
+  const materiais = [...porMaterial.values()].sort((a, b) => b.compras - a.compras || a.description.localeCompare(b.description));
+  return { linhas, materiais };
 }

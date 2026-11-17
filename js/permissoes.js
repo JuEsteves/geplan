@@ -10,8 +10,10 @@ const AREAS = {
   financeiro: ['financeiro', 'compras'],
   compras: ['compras'],
   cliente: [],
+  contador: [],
 };
 const O_QUE_PODE = {
+  contador: 'consultar o financeiro da empresa (somente leitura)',
   supervisor: 'lançar medições e o diário de obra',
   financeiro: 'lançar contratos, pedidos, despesas e pagamentos',
   compras: 'lançar contratos e pedidos de compra',
@@ -33,6 +35,11 @@ export const pode = (area) => {
   if (area === 'compras') return papel() !== 'cliente' && liberado('comprar');
   return (AREAS[papel()] || []).includes(area);
 };
+
+/** Financeiro da EMPRESA (contas bancárias, salários, DRE, caixa): administrador, financeiro e contador veem;
+ *  administrador e financeiro gravam. Engenheiro não (decisão da empresa, nov/2026). No modo Drive, sim. */
+export const veFinEmpresa = () => !papel() || ['admin', 'financeiro', 'contador'].includes(papel());
+export const gravaFinEmpresa = () => !papel() || ['admin', 'financeiro'].includes(papel());
 
 /** O perfil vê custos internos? (cliente não vê — o banco também não envia esses dados a ele) */
 export const veCustos = () => papel() !== 'cliente';

@@ -2,10 +2,12 @@
 // telas de cada obra (contexto → indicadores.js). Nenhum dado de demonstração: sem dados, mostra estado vazio.
 import * as store from './store.js';
 import { esc, I, ui, queueRender, secao, ajuda } from './ui.js';
-import { fmtBR, isoBR, fmtNum, fmtBRL, todayDay } from './schedule.js';
+import { fmtBR, isoBR, fmtNum, fmtBRL, todayDay, todayISO } from './schedule.js';
+import { contasAPagar } from './financeiro.js';
 import { contexto } from './obra.js';
 import { resumoObra, consolidado } from './indicadores.js';
-import { pode, veCustos } from './permissoes.js';
+import { pode, veCustos, veFinEmpresa } from './permissoes.js';
+import { contasDaEmpresa } from './financeiroEmpresa.js';
 import { ICONES } from './navegacao.js';
 import { STATUS_OBRA } from './model.js';
 import { configurado as nuvemConfigurada } from './nuvem/supabase.js';
@@ -61,9 +63,22 @@ const MODULOS = [
   ] : [
     { r: 'Compras no Financeiro', ico: 'custos', href: '#/modulo/compras', d: 'Pedidos de compra registrados nos custos de cada obra.' },
   ] },
+  // financeiro da empresa: separado dos custos de cada obra (que ficam com a engenharia)
+  { grupo: 'Financeiro da empresa', area: 'fin', itens: [
+    { r: 'Contas a pagar', ico: 'custos', href: '#/contas', d: 'O que vence nesta semana e no mês: obras e escritório.' },
+    ...(nuvemConfigurada() ? [
+      { r: 'Lançamentos da empresa', ico: 'custos', href: '#/fin/lancamentos', d: 'Contas a pagar e a receber com rateio por centro de custo.' },
+      { r: 'Contratos com clientes', ico: 'orcamento', href: '#/fin/contratos', d: 'Taxa de administração, verbas com teto e prestação de contas.' },
+      { r: 'DRE', ico: 'fisico', href: '#/fin/dre', d: 'A empresa dá lucro? Resultado por mês, da empresa ou de uma obra.' },
+      { r: 'Fluxo de caixa', ico: 'curva', href: '#/fin/caixa', d: 'Vai faltar caixa? Previsto × realizado e saldo projetado.' },
+      { r: 'Fiscal', ico: 'documentos', href: '#/fin/fiscal', d: 'Notas de serviço com retenções, notas de compra e INSS por obra.' },
+      { r: 'Cadastros financeiros', ico: 'config', href: '#/fin/cadastros', d: 'Plano de contas, centros de custo, contas bancárias e regime.' },
+    ] : []),
+  ] },
 ];
 function atalhos(comDescricao = false) {
-  return MODULOS.map((g) => `<div class="atalhos-grupo" data-area="${g.area}"><div class="atalhos-titulo">${esc(g.grupo)}</div><div class="atalhos">${g.itens.map((m) => {
+  // financeiro da empresa só para quem tem acesso (engenheiro não vê)
+  return MODULOS.filter((g) => g.area !== 'fin' || veFinEmpresa()).map((g) => `<div class="atalhos-grupo" data-area="${g.area}"><div class="atalhos-titulo">${esc(g.grupo)}</div><div class="atalhos">${g.itens.map((m) => {
     const corpo = `<span class="atalho-ico">${ICONES[m.ico]}</span><span><b>${esc(m.r)}</b>${comDescricao ? `<small>${esc(m.d)}</small>` : m.href ? '' : '<small>em desenvolvimento</small>'}</span>${m.href || !comDescricao ? '' : '<span class="badge">em desenvolvimento</span>'}`;
     return m.href ? `<a class="atalho${comDescricao ? ' atalho-desc' : ''}" href="${m.href}">${corpo}</a>`
       : `<span class="atalho atalho-off${comDescricao ? ' atalho-desc' : ''}" aria-disabled="true" title="Em desenvolvimento">${corpo}</span>`;
@@ -225,6 +240,42 @@ export function viewPendencias() {
     ${rs.length ? `<div class="grid-2">${[s.atrasadas, s.entregas, s.cotacao, s.diario, s.proximas, s.atencao, s.planejamento].map((x) => x.html).join('')}</div>
     <p class="muted small">Ainda não existe cadastro de tarefas livres (atribuídas a pessoas): esta página reúne as pendências que o GEPLAN já registra.</p>`
       : '<div class="card empty"><p>Nenhuma obra cadastrada.</p><a class="btn" href="#/inicio">Ir para a visão geral</a></div>'}`;
+}
+
+/* ---------- Contas a pagar (todas as obras) ---------- */
+const GRUPOS_CONTAS = [
+  ['vencidas', 'Vencidas', 'crit'], ['semana', 'Vencem nos próximos 7 dias', 'warn'], ['mes', 'Vencem em até 30 dias', ''],
+  ['depois', 'Vencem depois de 30 dias', ''], ['semData', 'Sem data de vencimento', ''],
+];
+export function viewContasAPagar() {
+  const cab = `<div class="page-head"><div><h1>Contas a pagar</h1><div class="muted">O que a empresa tem a pagar — despesas das obras e contas do escritório — pela data de vencimento.</div></div></div>`;
+  if (!veCustos() || !veFinEmpresa()) return `${cab}<div class="card empty"><p>Seu perfil não acessa o financeiro da empresa.</p></div>`;
+  const obras = store.obras();
+  const empresa = contasDaEmpresa();
+  const { contas, totais } = contasAPagar(obras, todayISO(), empresa.lista);
+  if (!contas.length) {
+    return `${cab}<div class="card empty"><p>${empresa.pronto ? 'Nenhuma conta a pagar.' : 'Carregando…'}</p><p class="small muted">As contas aparecem aqui quando uma despesa é lançada em <b>Custos</b> da obra (ou um lançamento em <b>Lançamentos da empresa</b>) sem pagamento, ou com pagamento parcial.</p></div>`;
+  }
+  const cartao = (t, v, s, cor = '') => `<div class="card kpi"><div class="k-label">${t}</div><div class="k-value" style="font-size:19px${cor ? `;color:${cor}` : ''}">${fmtBRL(v)}</div><div class="k-sub">${s}</div></div>`;
+  const tabela = (lista) => `<div class="card table-wrap"><table class="data"><thead><tr><th>Vencimento</th><th>Obra</th><th>Fornecedor / descrição</th><th>Documento</th><th class="num">Valor</th><th class="num">Já pago</th><th class="num">A pagar</th><th></th></tr></thead><tbody>
+    ${lista.map((c) => `<tr><td class="nowrap">${c.vencimento ? isoBR(c.vencimento) : '<span class="muted">—</span>'}</td><td>${esc(c.obra)}</td>
+      <td>${esc(c.fornecedor)}<div class="small muted">${esc(c.descricao)}</div></td><td>${esc(c.documento)}</td>
+      <td class="num nowrap">${fmtBRL(c.valor)}</td><td class="num nowrap">${c.pago ? fmtBRL(c.pago) : '—'}</td><td class="num nowrap"><b>${fmtBRL(c.saldo)}</b></td>
+      <td class="nowrap">${c.empresa ? '<a class="btn sm" href="#/fin/lancamentos">Abrir</a>' : `<a class="btn sm" href="#/obra/${c.obraId}/financeiro">Abrir na obra</a>`}</td></tr>`).join('')}
+    </tbody><tfoot><tr><th colspan="6">Total</th><th class="num nowrap">${fmtBRL(lista.reduce((s, c) => s + c.saldo, 0))}</th><th></th></tr></tfoot></table></div>`;
+  return `${cab}<div class="stack">
+    <div class="kpis">
+      ${cartao('Total a pagar', totais.total, `${contas.length} conta${contas.length > 1 ? 's' : ''}: ${new Set(contas.filter((c) => !c.empresa).map((c) => c.obraId)).size} obra(s)${contas.some((c) => c.empresa) ? ' e empresa' : ''}`)}
+      ${cartao('Vencidas', totais.vencidas, 'antes de hoje', totais.vencidas ? 'var(--crit)' : '')}
+      ${cartao('Próximos 7 dias', totais.semana, 'inclui as de hoje')}
+      ${cartao('Até 30 dias', totais.mes, 'do 8º ao 30º dia')}
+    </div>
+    ${GRUPOS_CONTAS.map(([g, titulo, cor]) => {
+      const l = contas.filter((c) => c.grupo === g);
+      return l.length ? `<div class="row"><h2 style="flex:1;margin:0">${titulo} <span class="badge ${cor}">${l.length}</span></h2></div>${tabela(l)}` : '';
+    }).join('')}
+    <div class="muted small">Para registrar o pagamento: despesa de obra, abra em <b>Custos</b> da obra e inclua a data e o valor pagos; conta da empresa, use "Pagar" em <a href="#/fin/lancamentos">Lançamentos da empresa</a>. Despesa sem data de vencimento aparece no fim: informe o vencimento para ela entrar na semana certa. Os pagamentos de mão de obra por medição ficam em <a href="#/pagamentos">Pagamentos de mão de obra</a>.</div>
+  </div>`;
 }
 
 /* ---------- eventos (busca e filtros de "Minhas obras") ---------- */

@@ -5,6 +5,7 @@ import * as store from './store.js';
 import { esc, estaAberto } from './ui.js';
 import { fmtBR, isoBR } from './schedule.js';
 import { configurado as nuvemConfigurada } from './nuvem/supabase.js';
+import { veFinEmpresa } from './permissoes.js';
 
 const svg = (p) => `<svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
 export const ICONES = {
@@ -74,6 +75,7 @@ function menu() {
       // modo nuvem: as compras do quadro já aparecem nos Custos da obra (sem item repetido no menu);
       // modo local: os pedidos de compra ficam na aba Custos de cada obra
       ...(nuvem ? [] : [{ id: 'mod-compras', rotulo: 'Compras no Financeiro', href: '#/modulo/compras', ico: 'custos' }]),
+      ...(nuvem ? [{ id: 'estoque', rotulo: 'Estoque e sobras', href: '#/estoque', ico: 'entregas' }] : []),
       nuvem ? { id: 'fornecedores', rotulo: 'Fornecedores', href: '#/fornecedores', ico: 'fornecedores' }
         : { id: 'fornecedores', rotulo: 'Fornecedores', ico: 'fornecedores', futuro: 'O cadastro de fornecedores funciona no modo nuvem (banco de dados da empresa).' },
     ] },
@@ -81,6 +83,19 @@ function menu() {
     ...(nuvem ? [] : [{ grupo: 'Documentos', itens: [
       { id: 'drive', rotulo: 'Google Drive e backup', href: '#/drive', ico: 'documentos' },
     ] }]),
+    // financeiro da EMPRESA (todas as obras e o escritório), separado do controle de custos de cada obra (engenharia);
+    // só para administrador, financeiro e contador (engenheiro não vê — decisão da empresa)
+    ...(veFinEmpresa() ? [{ grupo: 'Financeiro da empresa', itens: [
+      { id: 'contas', rotulo: 'Contas a pagar', href: '#/contas', ico: 'custos' },
+      ...(nuvem ? [
+        { id: 'fin-lancamentos', rotulo: 'Lançamentos da empresa', href: '#/fin/lancamentos', ico: 'custos' },
+        { id: 'fin-contratos', rotulo: 'Contratos com clientes', href: '#/fin/contratos', ico: 'orcamento' },
+        { id: 'fin-dre', rotulo: 'DRE', href: '#/fin/dre', ico: 'fisico' },
+        { id: 'fin-caixa', rotulo: 'Fluxo de caixa', href: '#/fin/caixa', ico: 'curva' },
+        { id: 'fin-fiscal', rotulo: 'Fiscal', href: '#/fin/fiscal', ico: 'documentos' },
+        { id: 'fin-cadastros', rotulo: 'Cadastros financeiros', href: '#/fin/cadastros', ico: 'config' },
+      ] : []),
+    ] }] : []),
     { grupo: 'Administração', itens: [
       ...(nuvem ? [{ id: 'drive', rotulo: 'Empresa, usuários e plano', href: '#/drive', ico: 'fornecedores' }] : []),
       { id: 'configuracoes', rotulo: 'Configurações', href: '#/configuracoes', ico: 'config' },
@@ -103,11 +118,12 @@ export function itemAtivo(route) {
   if (route.name === 'suprimentos') return route.secao === 'entregas' ? 'sup-entregas' : 'sup-quadro';
   if (route.name === 'diario') return 'mod-diario';
   if (route.name === 'medicoes') return 'pagamentos';   // cadastro de profissionais e boletins antigos (consulta)
+  if (route.name === 'fin') return { cadastros: 'fin-cadastros', contratos: 'fin-contratos', prestacao: 'fin-contratos', dre: 'fin-dre', caixa: 'fin-caixa', fiscal: 'fin-fiscal' }[route.secao] || 'fin-lancamentos';
   return route.name;
 }
 
 /** Cor de cada grupo do menu (mesma cor nos atalhos e indicadores da área). */
-export const AREA_GRUPO = { 'Visão geral': 'visao', Planejamento: 'plan', 'Orçamentos e custos': 'orc', 'Execução e controle': 'exec', Suprimentos: 'sup', Documentos: 'doc', Administração: 'adm' };
+export const AREA_GRUPO = { 'Visão geral': 'visao', Planejamento: 'plan', 'Orçamentos e custos': 'orc', 'Execução e controle': 'exec', Suprimentos: 'sup', Documentos: 'doc', 'Financeiro da empresa': 'fin', Administração: 'adm' };
 
 export function renderMenu(route) {
   const ativo = itemAtivo(route);

@@ -211,7 +211,9 @@ export function viewObra(route) {
   const tab = abas.some(([k]) => k === pedida) ? pedida : 'painel';
   const body = corpoDaAba(c, tab, route.resto || []);
   const temEAP = o.eap.length > 0;
-  const alertas = c.calc.alertasItens + c.calc.alertasAtiv;
+  // atividade só com duração padrão não é erro: aparece à parte, sem cor de alerta
+  const aConfirmar = c.calc.duracoesAConfirmar || 0;
+  const alertas = c.calc.alertasItens + c.calc.alertasAtiv - aConfirmar;
   return `<div class="page-head" style="margin-bottom:10px"><div>
       <a href="#/obras" class="muted small" style="text-decoration:none">← Obras</a>
       <h1>${esc(o.nome)}</h1>
@@ -222,6 +224,7 @@ export function viewObra(route) {
         <span><b class="ink">${fmtNum(c.calc.totalHH, 0)}</b> HH</span>·
         <span><b class="ink">${fmtBRL(c.calc.totalOrcamento)}</b></span>
         ${alertas ? `· <a href="#/obra/${o.id}/atividades" data-act="verAlertas" class="badge warn" style="text-decoration:none">${I.alert} ${alertas} alerta${alertas > 1 ? 's' : ''}</a>` : ''}
+        ${aConfirmar ? `· <a href="#/obra/${o.id}/atividades" data-act="verAlertas" class="badge" style="text-decoration:none" title="Atividades ainda sem duração definida: o cronograma usa a duração padrão até você informar a equipe, o orçamento ou a duração">${aConfirmar} ${aConfirmar > 1 ? 'durações' : 'duração'} a confirmar</a>` : ''}
       </div></div></div>
     ${caminhoDaObra(o, c)}
     <nav class="tabs">${abas.map(([k, l]) => `<a href="#/obra/${o.id}/${k}" class="${tab === k ? 'active' : ''}">${l}</a>`).join('')}</nav>

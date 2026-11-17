@@ -71,17 +71,16 @@ function menu() {
       ...[['quadro', 'Quadro de compras', 'compras', '#/suprimentos'], ['entregas', 'Entregas e recebimentos', 'entregas', '#/suprimentos/entregas']].map(([id, rotulo, ico, href]) => (nuvem
         ? { id: `sup-${id}`, rotulo, href, ico }
         : { id: `sup-${id}`, rotulo, ico, futuro: 'Funciona no modo nuvem (banco de dados da empresa). No modo local, use os pedidos de compra do Financeiro de cada obra.' })),
-      // compromissos de compra registrados na aba Financeiro de cada obra (inclui os gerados pelo quadro)
-      { id: 'mod-compras', rotulo: 'Compras no Financeiro', href: '#/modulo/compras', ico: 'custos' },
+      // modo nuvem: as compras do quadro já aparecem nos Custos da obra (sem item repetido no menu);
+      // modo local: os pedidos de compra ficam na aba Custos de cada obra
+      ...(nuvem ? [] : [{ id: 'mod-compras', rotulo: 'Compras no Financeiro', href: '#/modulo/compras', ico: 'custos' }]),
       nuvem ? { id: 'fornecedores', rotulo: 'Fornecedores', href: '#/fornecedores', ico: 'fornecedores' }
         : { id: 'fornecedores', rotulo: 'Fornecedores', ico: 'fornecedores', futuro: 'O cadastro de fornecedores funciona no modo nuvem (banco de dados da empresa).' },
     ] },
-    { grupo: 'Documentos', itens: [
-      { id: 'documentos', rotulo: 'Documentos da obra', ico: 'documentos', futuro: 'Em desenvolvimento: documentos, fotos e anexos das obras.' },
-      nuvem
-        ? { id: 'gdrive', rotulo: 'Google Drive', ico: 'documentos', futuro: 'No modo nuvem os dados ficam no banco da empresa; a integração com o Google Drive é usada só no modo local. Para uma cópia dos dados, use Administração › Configurações › Exportar.' }
-        : { id: 'drive', rotulo: 'Google Drive e backup', href: '#/drive', ico: 'documentos' },
-    ] },
+    // itens "em breve" não aparecem no menu; no modo local o grupo guarda o Google Drive
+    ...(nuvem ? [] : [{ grupo: 'Documentos', itens: [
+      { id: 'drive', rotulo: 'Google Drive e backup', href: '#/drive', ico: 'documentos' },
+    ] }]),
     { grupo: 'Administração', itens: [
       ...(nuvem ? [{ id: 'drive', rotulo: 'Empresa, usuários e plano', href: '#/drive', ico: 'fornecedores' }] : []),
       { id: 'configuracoes', rotulo: 'Configurações', href: '#/configuracoes', ico: 'config' },
@@ -92,7 +91,7 @@ function menu() {
 /** Item do menu que corresponde à rota atual. */
 export function itemAtivo(route) {
   if (route.name === 'obra') {
-    if (route.sub === 'compras') return 'mod-compras';
+    if (route.sub === 'compras') return nuvemConfigurada() ? 'mod-financeiro' : 'mod-compras';
     const porAba = { orcamento: 'mod-orcamento', vinculos: 'mod-orcamento', atividades: 'mod-gantt', gantt: 'mod-gantt', curva: 'mod-curva',
       medicoes: 'mod-medicoes', financeiro: 'mod-financeiro', diario: 'mod-diario', painel: 'mod-painel', compras: 'sup-quadro', entregas: 'sup-entregas', contratos: 'mod-contratos' };
     return porAba[route.tab] || 'obras';

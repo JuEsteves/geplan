@@ -46,21 +46,20 @@ const MODULOS = [
     { r: 'Orçamentos', ico: 'orcamento', href: '#/modulo/orcamento', d: 'Itens, composições, BDI, revisões e importação do Excel.' },
     { r: 'Medições', ico: 'medicoes', href: '#/modulo/medicoes', d: nuvemConfigurada() ? 'Medição dos contratos: planilha por % ou por ambiente, retenção e pagamentos.' : 'Avanço físico acumulado de cada atividade.' },
     ...(nuvemConfigurada() ? [{ r: 'Pagamentos', ico: 'custos', href: '#/pagamentos', d: 'Pagamento da sexta-feira, por profissional, balanço das obras e PIX.' }] : []),
-    { r: 'Custos', ico: 'custos', href: '#/modulo/financeiro', d: 'Contratos, despesas e pagamentos sem duplicidade.' },
+    { r: 'Custos', ico: 'custos', href: '#/modulo/financeiro', d: 'Quanto foi orçado, contratado, gasto e pago em cada obra.' },
   ] },
   { grupo: 'Execução e controle', area: 'exec', itens: [
     { r: 'Diário de obra', ico: 'diario', href: '#/diario', d: 'RDO por período, fotos e vídeos, aprovação com assinatura e PDF.' },
     ...(nuvemConfigurada() ? [{ r: 'Contratos', ico: 'tarefas', href: '#/modulo/contratos', d: 'Empreiteiros e prestadores: escopo, valor, parcelas e prazo.' }] : []),
     { r: 'Tarefas e pendências', ico: 'tarefas', href: '#/pendencias', d: 'Atrasos e pendências de todas as obras.' },
   ] },
-  { grupo: 'Suprimentos e documentos', area: 'sup', itens: [
-    ...(nuvemConfigurada() ? [
-      { r: 'Quadro de compras', ico: 'compras', href: '#/suprimentos', d: 'Pedidos com grupos de materiais, cotações e compras, por etapa.' },
-      { r: 'Entregas', ico: 'entregas', href: '#/suprimentos/entregas', d: 'Grupos comprados aguardando entrega ou retirada na obra.' },
-    ] : []),
-    { r: 'Compras no Financeiro', ico: 'custos', href: '#/modulo/compras', d: 'Compromissos de compra registrados no Financeiro de cada obra.' },
-    { r: 'Fornecedores', ico: 'fornecedores', d: 'Cadastro central: contatos, condições, documentos e histórico.', ...(nuvemConfigurada() ? { href: '#/fornecedores' } : {}) },
-    { r: 'Documentos', ico: 'documentos', d: 'Documentos, fotos e anexos das obras.' },
+  // modo nuvem: as compras ficam no Quadro (e aparecem nos Custos da obra); "Compras no Financeiro" só no modo local
+  { grupo: 'Suprimentos', area: 'sup', itens: nuvemConfigurada() ? [
+    { r: 'Quadro de compras', ico: 'compras', href: '#/suprimentos', d: 'Pedidos com grupos de materiais, cotações e compras, por etapa.' },
+    { r: 'Entregas', ico: 'entregas', href: '#/suprimentos/entregas', d: 'Grupos comprados aguardando entrega ou retirada na obra.' },
+    { r: 'Fornecedores', ico: 'fornecedores', href: '#/fornecedores', d: 'Cadastro central: contatos, condições, documentos e histórico.' },
+  ] : [
+    { r: 'Compras no Financeiro', ico: 'custos', href: '#/modulo/compras', d: 'Pedidos de compra registrados nos custos de cada obra.' },
   ] },
 ];
 function atalhos(comDescricao = false) {
@@ -145,27 +144,27 @@ function secoes(rs, limite) {
 function cabecalho() {
   const criar = pode('cadastro');
   return `<div class="page-head"><div><h1>Visão geral</h1><div class="muted">Acompanhe suas obras, planejamento e desempenho.</div></div>
-    ${criar ? `<div class="row"><a class="btn" href="#/importar">${I.upload} Importar planilha</a><button class="btn primary" data-act="newObra">${I.plus} Nova obra</button></div>` : ''}</div>`;
+    ${criar ? `<div class="row"><button class="btn primary" data-act="newObra">${I.plus} Nova obra</button></div>` : ''}</div>`;
 }
 
 function vazio() {
   const criar = pode('cadastro');
   const passos = [
-    ['Importe a planilha modelo', 'ela vira a biblioteca de fases (EAP) e de composições', '#/importar'],
-    ['Cadastre a obra', 'escolhendo as fases do modelo que entram', null],
-    ['Complete o orçamento e os vínculos', 'cada item distribuído 100% entre as atividades', null],
-    ['Revise o cronograma e aprove a linha de base', 'Gantt, caminho crítico e Curva S planejada', null],
-    ['Registre a execução', 'medições, diário de obra e despesas', null],
+    ['Crie a obra', 'pelo modelo de etapas do GEPLAN, por uma lista em branco ou pela obra de exemplo, que já vem preenchida', null],
+    ['Ajuste as etapas', 'inclua, mova ou exclua etapas e atividades: nenhuma obra é igual', null],
+    ['Monte o orçamento e ligue às atividades', 'as quantidades calculam a duração de cada serviço', null],
+    ['Revise o cronograma', 'prazos, sequência dos serviços e curva de avanço planejada', null],
+    ['Acompanhe a execução e os custos', 'diário de obra, medições, compras e despesas', null],
   ];
   return `<div class="stack">
     <div class="card card-pad inicio-intro">
       <div class="inicio-vazio-ico">${ICONES.obras}</div>
       <div style="flex:1;min-width:240px">
         <h2 style="margin:0 0 4px">${criar ? 'Boas-vindas ao GEPLAN' : 'Nenhuma obra liberada para você'}</h2>
-        <p class="muted" style="margin:0">${criar ? 'Orçamento, planejamento, execução e custos das suas obras em um só lugar: do orçamento por composições ao cronograma, Curva S, medições e diário de obra.'
+        <p class="muted" style="margin:0">${criar ? 'Planejamento, orçamento, compras, diário, medições e custos das suas obras em um só lugar. Para conhecer, crie uma obra e escolha "Obra de exemplo": ela já vem com etapas, orçamento, cronograma e custos preenchidos.'
           : 'Peça ao administrador da empresa para incluir você na equipe de uma obra. Enquanto isso, conheça os módulos abaixo.'}</p>
       </div>
-      ${criar ? `<div class="row"><button class="btn primary" data-act="newObra">${I.plus} Cadastrar a primeira obra</button><a class="btn" href="#/importar">${I.upload} Importar planilha</a></div>` : ''}
+      ${criar ? `<div class="row"><button class="btn primary" data-act="newObra">${I.plus} Cadastrar a primeira obra</button></div>` : ''}
     </div>
     ${criar ? `<div class="card card-pad"><h2>Como começar</h2><ol class="passos">${passos.map(([t, d, h]) => `<li><b>${h ? `<a href="${h}">${t}</a>` : t}</b> <span class="muted small">— ${d}</span></li>`).join('')}</ol></div>` : ''}
     <h2 style="margin:6px 0 0">O que você pode fazer</h2>

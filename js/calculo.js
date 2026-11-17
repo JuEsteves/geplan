@@ -115,7 +115,9 @@ export function calcular(obra, lib) {
   const totalHH = vinculos.reduce((s, r) => s + r.hh, 0);
   const alertasItens = [...itens.values()].filter((I) => I.alertas.length).length;
   const alertasAtiv = [...ativ.values()].filter((A) => A.alertas.length).length;
-  return { itens, ativ, vinculos, totalOrcamento, totalAlocado, totalHH, jornada, eficiencia, alertasItens, alertasAtiv, ativIds };
+  // atividades cujo único aviso é a duração padrão (ainda não detalhadas): não são erro, só "a confirmar"
+  const duracoesAConfirmar = [...ativ.values()].filter((A) => A.provisoria && A.alertas.length === 1).length;
+  return { itens, ativ, vinculos, totalOrcamento, totalAlocado, totalHH, jornada, eficiencia, alertasItens, alertasAtiv, duracoesAConfirmar, ativIds };
 }
 
 export const fmtPct = (p) => `${(Math.round(p * 10000) / 100).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%`;

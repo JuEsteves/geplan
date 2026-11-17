@@ -88,8 +88,8 @@ export function tabPainel(c) {
     <div class="kpis">
       ${card('Custo orçado (direto)', fmtBRL(orc.custoDireto), isFinite(orc.bdi) && orc.bdi ? `preço de venda ${fmtBRL(orc.precoVenda)} (BDI ${fmtNum(orc.bdi * 100, 2)}%)` : 'BDI não configurado')}
       ${card('Valor contratado', o.valorContratado ? fmtBRL(o.valorContratado) : '—', o.valorContratado ? '' : 'informe na aba Cadastro')}
-      ${card('Custo comprometido', fmtBRL(custos.comprometido), `${fmtNum(pctDe(custos.comprometido, orc.custoDireto), 1)}% do orçado`)}
-      ${card('Custo realizado (incorrido)', fmtBRL(custos.incorrido), `pago ${fmtBRL(custos.pago)} · a pagar ${fmtBRL(custos.saldoAPagar)}`)}
+      ${card('Contratado e comprado', fmtBRL(custos.comprometido), `${fmtNum(pctDe(custos.comprometido, orc.custoDireto), 1)}% do orçado`)}
+      ${card('Gasto', fmtBRL(custos.incorrido), `pago ${fmtBRL(custos.pago)} · a pagar ${fmtBRL(custos.saldoAPagar)}`)}
       ${card('Físico planejado (hoje)', `${fmtNum(av.fisicoPlan, 1)}%`, av.semPeso ? 'sem peso físico definido' : `peso: ${{ hh: 'HH', custo: 'custo', duracao: 'duração', manual: 'manual' }[o.pesoFisico || 'hh']}`)}
       ${card('Físico realizado', `${fmtNum(av.fisicoReal, 1)}%`, `desvio ${av.fisicoReal - av.fisicoPlan >= 0 ? '+' : ''}${fmtNum(av.fisicoReal - av.fisicoPlan, 1)} pts`, av.fisicoReal + 0.5 < av.fisicoPlan ? 'var(--crit)' : '')}
       ${card('Financeiro realizado', `${fmtNum(av.financeiroPct, 1)}%`, 'incorrido ÷ custo planejado — não é avanço físico')}
@@ -210,7 +210,7 @@ function tabelaCustosFase(c, pf, diaEv) {
       <td style="min-width:110px">${f.id ? barra(fis, fin) : ''}<div class="small muted">${fis == null ? '' : `físico ${fmtNum(fis, 0)}%`}${fis != null && fin != null ? ' · ' : ''}${fin == null ? '' : `financ. ${fmtNum(fin, 0)}%`}</div></td></tr>`;
   }).join('');
   const t = pf.totais;
-  return `<div class="card table-wrap"><table class="data custos-fase"><thead><tr><th>Fase da EAP</th><th class="num">Orçado</th><th class="num">Valor agregado</th><th class="num">Comprometido</th><th class="num">Incorrido</th><th class="num">Pago</th><th class="num">A pagar</th><th class="num">A lançar</th><th>Físico × financeiro</th></tr></thead>
+  return `<div class="card table-wrap"><table class="data custos-fase"><thead><tr><th>Fase da EAP</th><th class="num">Orçado</th><th class="num" title="Custo orçado das atividades × % já executado">Executado (valor)</th><th class="num" title="Contratos, pedidos e despesas avulsas">Contratado</th><th class="num" title="Notas e recibos lançados">Gasto</th><th class="num">Pago</th><th class="num">A pagar</th><th class="num">A lançar</th><th>Físico × financeiro</th></tr></thead>
     <tbody>${linhas || '<tr><td colspan="9" class="muted">Monte as fases da EAP para ver os custos por fase.</td></tr>'}</tbody>
     <tfoot><tr><th>Total</th><th class="num nowrap">${fmtBRL(t.orcado)}</th><th class="num nowrap">${fmtBRL(evTot)}</th><th class="num nowrap">${fmtBRL(t.comprometido)}</th><th class="num nowrap">${fmtBRL(t.incorrido)}</th><th class="num nowrap">${fmtBRL(t.pago)}</th><th class="num nowrap">${fmtBRL(t.incorrido - t.pago)}</th><th class="num nowrap">${t.aLancar ? fmtBRL(t.aLancar) : '—'}</th><th></th></tr></tfoot></table></div>`;
 }
@@ -252,12 +252,12 @@ export function tabFinanceiro(c) {
     <div class="kpis">
       ${kpi('Custo orçado', fmtBRL(orc.custoDireto), isFinite(orc.bdi) && orc.bdi ? `venda ${fmtBRL(orc.precoVenda)}` : 'sem BDI')}
       ${kpi('Valor contratado (cliente)', o.valorContratado ? fmtBRL(o.valorContratado) : '—')}
-      ${kpi('Comprometido', fmtBRL(r.comprometido), r.aLancar ? 'contratos + pedidos + despesas avulsas + medições a lançar' : 'contratos + pedidos + despesas avulsas')}
-      ${kpi('Incorrido', fmtBRL(r.incorrido), 'despesas lançadas')}
+      ${kpi('Contratado e comprado', fmtBRL(r.comprometido), r.aLancar ? 'contratos + pedidos + despesas avulsas + medições a lançar' : 'contratos + pedidos + despesas avulsas')}
+      ${kpi('Gasto', fmtBRL(r.incorrido), 'notas e recibos lançados')}
       ${kpi('Pago', fmtBRL(r.pago), `a pagar ${fmtBRL(r.saldoAPagar)}`)}
-      ${kpi('A incorrer', fmtBRL(r.aIncorrer), 'saldo de contratos e pedidos + medições a lançar')}
+      ${kpi('Ainda a gastar', fmtBRL(r.aIncorrer), r.aLancar ? 'saldo dos contratos e pedidos + medições a lançar' : 'saldo dos contratos e pedidos')}
       ${r.aLancar ? kpi('Medições a lançar', fmtBRL(r.aLancar), 'aprovadas, ainda sem despesa no Financeiro') : ''}
-      ${kpi('Previsão de custo final (EAC)', fmtBRL(va.eac), va.cpi != null ? `CPI ${fmtNum(va.cpi, 2)}` : '')}
+      ${kpi('Previsão de custo final', fmtBRL(va.eac), va.cpi == null ? 'igual ao orçado até haver gasto' : !(va.ev > 0) ? 'gasto até hoje + orçado (ainda sem avanço medido)' : va.vac < -0.005 ? `${fmtBRL(-va.vac)} acima do orçado` : va.vac > 0.005 ? `${fmtBRL(va.vac)} abaixo do orçado` : 'dentro do orçado')}
     </div>
     ${r.alertas.length ? `<div class="alert err">${r.alertas.map(esc).join('<br>')}</div>` : ''}
     <div class="row" id="secao-fases" style="flex-wrap:wrap;gap:10px;align-items:flex-end"><h2 style="flex:1;min-width:200px;margin:0">Custos por fase</h2>
@@ -266,15 +266,15 @@ export function tabFinanceiro(c) {
       ${corte != null || cat ? '<button class="btn sm" data-act="custosLimpar">Limpar filtros</button>' : ''}</div>
     ${pf.semFase ? `<div class="alert warn">${pf.semFase} lançamento(s) sem fase (contrato/despesa sem fase, sem item do orçamento ou com item sem vínculo de 100% com a EAP) — os valores aparecem na linha <b>Sem fase</b>. Informe a fase no contrato ou na despesa para distribuí-los.</div>` : ''}
     ${tabelaCustosFase(c, pf, corte ?? hoje)}
-    <div class="muted small"><b>Orçado</b> = custo direto (sem BDI) repartido pelos vínculos com a EAP. <b>Valor agregado</b> = custo das atividades × % executado (avanço físico) — não se soma com o dinheiro. <b>A lançar</b> = medições aprovadas sem despesa (só para quem vê valores). Fase de cada valor: a informada → o item do orçamento → o contrato/pedido → "Sem fase". Barra: escura = físico, clara = financeiro (incorrido ÷ orçado).${cat ? ' Filtro de categoria não muda o orçado nem o valor agregado.' : ''}${corte != null ? ` Valores até ${isoBR(ui.custosAte)}.` : ''}</div>
+    <div class="muted small"><b>Orçado</b> = custo direto (sem BDI) de cada etapa. <b>Executado (valor)</b> = custo orçado das atividades × % já executado — mostra quanto do orçamento já virou obra; não é dinheiro gasto. <b>Contratado</b> = contratos, pedidos e despesas avulsas. <b>Gasto</b> = notas e recibos lançados. <b>A lançar</b> = medições aprovadas sem despesa (só para quem vê valores). Etapa de cada valor: a informada → a do item do orçamento → a do contrato ou pedido → "Sem fase". Barra: escura = executado, clara = gasto ÷ orçado.${cat ? ' O filtro de categoria não muda o orçado nem o executado.' : ''}${corte != null ? ` Valores até ${isoBR(ui.custosAte)}.` : ''}</div>
     <div class="row" id="secao-compras"><h2 style="flex:1">Contratos e pedidos de compra</h2><button class="btn sm" data-act="compNovo" data-t="Contrato">${I.plus} Contrato</button><button class="btn sm primary" data-act="compNovo" data-t="Pedido de compra">${I.plus} Pedido de compra</button></div>
-    ${comps ? `<div class="card table-wrap"><table class="data"><thead><tr><th>Documento</th><th>Fornecedor / objeto</th><th>Categoria</th><th class="num">Valor + aditivos</th><th class="num">Incorrido</th><th class="num">Saldo</th><th>Status</th><th></th></tr></thead><tbody>${comps}</tbody></table></div>` : vazioCard('Nenhum contrato ou pedido. Registre aqui os compromissos assumidos com fornecedores e empreiteiros.')}
+    ${comps ? `<div class="card table-wrap"><table class="data"><thead><tr><th>Documento</th><th>Fornecedor / objeto</th><th>Categoria</th><th class="num">Valor + aditivos</th><th class="num">Gasto</th><th class="num">Saldo</th><th>Status</th><th></th></tr></thead><tbody>${comps}</tbody></table></div>` : vazioCard('Nenhum contrato ou pedido. Registre aqui os compromissos assumidos com fornecedores e empreiteiros.')}
     <div class="row"><h2 style="flex:1">Despesas (notas, medições de terceiros, recibos)</h2><button class="btn sm primary" data-act="despNova">${I.plus} Despesa</button></div>
     ${desp ? `<div class="card table-wrap"><table class="data"><thead><tr><th>Data</th><th>Documento</th><th>Fornecedor / descrição</th><th>Categoria / vínculo</th><th class="num">Valor</th><th class="num">Pago</th><th>Situação</th><th></th></tr></thead><tbody>${desp}</tbody></table></div>` : vazioCard('Nenhuma despesa lançada.')}
     <div class="grid-2">
-      <div class="card table-wrap"><table class="data"><thead><tr><th>Categoria</th><th class="num">Incorrido</th></tr></thead><tbody>${r.porCategoria.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${fmtBRL(v)}</td></tr>`).join('') || '<tr><td colspan="2" class="muted">Sem despesas.</td></tr>'}</tbody></table></div>
+      <div class="card table-wrap"><table class="data"><thead><tr><th>Categoria</th><th class="num">Gasto</th></tr></thead><tbody>${r.porCategoria.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${fmtBRL(v)}</td></tr>`).join('') || '<tr><td colspan="2" class="muted">Sem despesas.</td></tr>'}</tbody></table></div>
     </div>
-    <div class="muted small"><b>Sem duplicidade:</b> a despesa vinculada a um contrato/pedido consome o saldo dele (não soma de novo no comprometido). Contrato/pedido cancelado ou encerrado conta só o que já foi incorrido. Medição aprovada entra como "a lançar" até virar despesa. Empreitada só entra quando medida. Material recebido sem nota não é custo (Suprimentos acompanha o pedido). EAC = realizado + (orçado − valor agregado).</div>
+    <div class="muted small"><b>Nada é contado duas vezes:</b> a despesa ligada a um contrato ou pedido abate o saldo dele (não soma de novo no contratado). Contrato ou pedido cancelado ou encerrado conta só o que já foi gasto nele. Medição aprovada entra como "a lançar" até virar despesa. Empreitada só entra quando medida. Material recebido sem nota ainda não é gasto (Suprimentos acompanha o pedido). Previsão de custo final = gasto até hoje + o que falta executar pelo valor orçado.</div>
   </div>`;
 }
 

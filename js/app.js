@@ -240,7 +240,7 @@ function parseRoute() {
   if (parts[0] === 'fornecedores') return parts[1] ? { name: 'fornecedor', id: parts[1] } : { name: 'fornecedores' };
   if (parts[0] === 'medicoes') return { name: 'medicoes', secao: parts[1] || 'boletins', id: parts[2] || '' };
   if (parts[0] === 'pagamentos') return { name: 'pagamentos', secao: parts[1] || 'semana' };
-  if (parts[0] === 'fin') return { name: 'fin', secao: ['cadastros', 'contratos', 'prestacao', 'dre', 'caixa', 'fiscal'].includes(parts[1]) ? parts[1] : 'lancamentos', aba: parts[2] || '', mes: parts[3] || '' };
+  if (parts[0] === 'fin') return { name: 'fin', secao: ['cadastros', 'contratos', 'prestacao', 'dre', 'caixa', 'fiscal', 'conciliacao', 'exportacao', 'auditoria'].includes(parts[1]) ? parts[1] : 'lancamentos', aba: parts[2] || '', mes: parts[3] || '' };
   if (parts[0] === 'diario') return { name: 'diario', obra: parts[1] || '', secao: parts[2] || 'geral', id: parts[3] || '', modo: parts[4] || '' };
   if (parts[0] === 'suprimentos') {
     if (parts[1] === 'pedido' && parts[2]) return { name: 'suprimentos', secao: 'pedido', id: parts[2], aba: parts[3] || 'resumo' };

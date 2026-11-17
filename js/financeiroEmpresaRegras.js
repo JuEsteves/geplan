@@ -382,6 +382,186 @@ export function inssPorObra({ notas = [], entradas = [], splits = [], contas = [
   return [...L.values()].sort((a, b) => b.mes.localeCompare(a.mes));
 }
 
+/* ---------- Conciliação bancária (migração 0025) ---------- */
+/** Lê um extrato OFX (SGML 1.x ou XML 2.x, como os bancos brasileiros exportam). Devolve
+ *  { linhas: [{ fitid, data, valor, memo }], saldo, saldoData, conta, banco, erro }. Valor com sinal (− saída). */
+export function lerOFX(texto) {
+  const t = String(texto || '');
+  if (!/<OFX>/i.test(t)) return { linhas: [], erro: 'O arquivo não parece um extrato OFX.' };
+  const campo = (bloco, tag) => { const m = bloco.match(new RegExp(`<${tag}>([^<\\r\\n]*)`, 'i')); return m ? m[1].trim() : ''; };
+  const data = (s) => { const m = String(s).match(/^(\d{4})(\d{2})(\d{2})/); return m ? `${m[1]}-${m[2]}-${m[3]}` : ''; };
+  const num = (s) => { let x = String(s).trim().replace(/\s/g, ''); if (/,\d{1,2}$/.test(x)) x = x.replace(/\./g, '').replace(',', '.'); return Number(x); };
+  const blocos = t.split(/<STMTTRN>/i).slice(1).map((b) => b.split(/<\/STMTTRN>|<\/BANKTRANLIST>/i)[0]);
+  const vistos = new Map();
+  const linhas = [];
+  for (const [i, b] of blocos.entries()) {
+    const d = data(campo(b, 'DTPOSTED')), v = Math.round(num(campo(b, 'TRNAMT')) * 100) / 100;
+    if (!d || !Number.isFinite(v) || v === 0) continue;
+    const memo = [campo(b, 'NAME'), campo(b, 'MEMO')].filter(Boolean).join(' — ').slice(0, 300);
+    let fitid = campo(b, 'FITID') || `${d}|${v}|${memo}|${i}`;
+    const n = vistos.get(fitid) || 0; vistos.set(fitid, n + 1);
+    if (n) fitid = `${fitid}#${n + 1}`;     // alguns bancos repetem o FITID no mesmo arquivo
+    linhas.push({ fitid: fitid.slice(0, 120), data: d, valor: v, memo });
+  }
+  const bal = t.split(/<LEDGERBAL>/i)[1] || '';
+  const saldo = bal ? num(campo(bal, 'BALAMT')) : null;
+  return { linhas, saldo: Number.isFinite(saldo) ? saldo : null, saldoData: bal ? data(campo(bal, 'DTASOF')) || null : null,
+    conta: campo(t, 'ACCTID'), banco: campo(t, 'BANKID'), erro: linhas.length ? '' : 'Nenhum lançamento encontrado no extrato.' };
+}
+
+const diasEntreDatas = (a, b) => Math.abs((new Date(`${a}T12:00:00Z`) - new Date(`${b}T12:00:00Z`)) / 86400000);
+/** Sugestões de conciliação: para cada linha pendente, o candidato de MESMO valor com a data mais próxima (até
+ *  `tolerancia` dias), sem repetir candidato. Candidatos: [{ tipo: 'baixa'|'pagamento', id, valor (com sinal), data, descricao }]. */
+export function sugerirConciliacao(linhas, candidatos, tolerancia = 5) {
+  const usados = new Set();
+  const out = new Map();
+  for (const l of [...(linhas || [])].sort((a, b) => a.posted_date.localeCompare(b.posted_date))) {
+    let melhor = null;
+    for (const c of candidatos || []) {
+      if (usados.has(`${c.tipo}:${c.id}`) || Math.abs(Number(c.valor) - Number(l.amount)) > 0.005) continue;
+      const d = diasEntreDatas(c.data, l.posted_date);
+      if (d > tolerancia) continue;
+      if (!melhor || d < melhor.dias || (d === melhor.dias && c.tipo === 'baixa' && melhor.c.tipo !== 'baixa')) melhor = { c, dias: d };
+    }
+    if (melhor) { usados.add(`${melhor.c.tipo}:${melhor.c.id}`); out.set(l.id, { ...melhor.c, dias: melhor.dias }); }
+  }
+  return out;
+}
+
+/** Resumo da conta: saldo pelo sistema (inicial + baixas da empresa nesta conta) × saldo do último extrato. */
+export function resumoConta(banco, { baixas = [], entradas = [], linhas = [], extratos = [] } = {}) {
+  const kind = new Map(entradas.map((e) => [e.id, e.kind]));
+  const sistema = r2(Number(banco.opening_balance || 0) + baixas.filter((b) => !b.deleted_at && b.bank_account_id === banco.id)
+    .reduce((s, b) => s + (kind.get(b.entry_id) === 'receber' ? 1 : -1) * Number(b.amount), 0));
+  const ult = [...extratos].filter((x) => x.bank_account_id === banco.id && x.ledger_balance != null).sort((a, b) => String(b.ledger_date || '').localeCompare(String(a.ledger_date || '')))[0];
+  const minhas = linhas.filter((l) => l.bank_account_id === banco.id);
+  return { sistema, extrato: ult ? Number(ult.ledger_balance) : null, extratoData: ult?.ledger_date || null, diferenca: ult ? r2(Number(ult.ledger_balance) - sistema) : null,
+    pendentes: minhas.filter((l) => l.status === 'pendente').length, conciliadas: minhas.filter((l) => l.status === 'conciliado').length, ignoradas: minhas.filter((l) => l.status === 'ignorado').length };
+}
+
+/* ---------- exportação contábil ---------- */
+const dataBR = (iso) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '');
+const rotCentro = (c) => (c ? (c.code || c.name) : '');
+
+/**
+ * Lançamentos contábeis pelo regime de caixa (o que entrou e saiu das contas da empresa no período):
+ * baixas da empresa (pagar: D conta do plano · C banco; receber: D banco · C conta do plano), com uma linha por centro de
+ * custo do rateio; e pagamentos das despesas das obras (D conta da categoria — ou 7.2 na obra por administração · C banco
+ * conciliado ou a conta escolhida). Fica de fora o que não é dinheiro: "cliente pagou direto" e retenções das notas.
+ * Conta sem De/Para sai em branco e vai para as pendências.
+ */
+export function montarExportacao({ de, ate, entradas = [], splits = [], baixas = [], contas = [], centros = [], bancos = [], pagObras = [], bancoObras = '', porCentro = true }) {
+  const conta = new Map(contas.map((c) => [c.id, c]));
+  const banco = new Map(bancos.map((b) => [b.id, b]));
+  const centro = new Map(centros.map((c) => [c.id, c]));
+  const entrada = new Map(entradas.map((e) => [e.id, e]));
+  const pend = new Map();
+  const falta = (chave, msg) => { if (!pend.has(chave)) pend.set(chave, { msg, n: 0 }); pend.get(chave).n++; };
+  const codConta = (c) => { if (!c) return ''; if (!c.accounting_code) falta(`c:${c.id}`, `Conta ${c.code} ${c.name} sem De/Para contábil`); return c.accounting_code || ''; };
+  const codBanco = (b) => { if (!b) return ''; if (!b.accounting_code) falta(`b:${b.id}`, `Conta bancária "${b.name}" sem conta contábil`); return b.accounting_code || ''; };
+  const linhas = [];
+  const dentro = (d) => d >= de && d <= ate;
+
+  for (const s of baixas) {
+    if (s.deleted_at || s.paid_by === 'cliente' || s.method === 'retencao' || !s.bank_account_id || !dentro(s.pay_date)) continue;
+    const e = entrada.get(s.entry_id); if (!e) continue;
+    const c = conta.get(e.account_id), b = banco.get(s.bank_account_id);
+    const cc = codConta(c), cb = codBanco(b);
+    const [debito, credito] = e.kind === 'pagar' ? [cc, cb] : [cb, cc];
+    const hist = `${e.kind === 'pagar' ? 'Pagamento' : 'Recebimento'} ${e.description}${e.party_name ? ` - ${e.party_name}` : ''}${e.document ? ` - doc ${e.document}` : ''}`;
+    const rs = splits.filter((x) => x.entry_id === e.id);
+    if (porCentro && rs.length > 1) {
+      ratearValor(s.amount, rs.map((x) => x.pct)).forEach((v, i) => linhas.push({ data: s.pay_date, valor: v, historico: hist, debito, credito, centro: rotCentro(centro.get(rs[i].cost_center_id)), origem: 'empresa' }));
+    } else {
+      linhas.push({ data: s.pay_date, valor: r2(s.amount), historico: hist, debito, credito, centro: rs.map((x) => rotCentro(centro.get(x.cost_center_id))).join(' / '), origem: 'empresa' });
+    }
+  }
+
+  const porCategoria = new Map(contas.filter((c) => c.obra_category).map((c) => [c.obra_category, c]));
+  const c72 = contas.find((c) => c.code === '7.2');
+  const centroObra = new Map(centros.filter((c) => c.project_id).map((c) => [c.project_id, c]));
+  for (const p of pagObras) {
+    if (!dentro(p.pay_date)) continue;
+    const c = p.client_funds ? c72 : (porCategoria.get(p.category) || porCategoria.get('Outro'));
+    if (!c) falta(`cat:${p.category}`, `Nenhuma conta do plano recebe a categoria "${p.category}"`);
+    const b = banco.get(p.bank_account_id || bancoObras);
+    if (!b) falta('sembanco', 'Pagamentos das obras sem conta bancária (escolha a conta usada para pagar as obras)');
+    linhas.push({ data: p.pay_date, valor: r2(p.amount), historico: `Pagamento ${p.obra}: ${p.supplier_name || p.description || p.category}${p.document ? ` - doc ${p.document}` : ''}${p.client_funds ? ' (recursos do cliente)' : ''}`,
+      debito: codConta(c), credito: codBanco(b), centro: rotCentro(centroObra.get(p.project_id)) || p.obra, origem: 'obra' });
+  }
+
+  linhas.sort((a, b) => a.data.localeCompare(b.data) || a.historico.localeCompare(b.historico, 'pt-BR'));
+  return { linhas, pendencias: [...pend.values()].map((p) => `${p.msg} (${p.n} lançamento${p.n > 1 ? 's' : ''})`),
+    total: r2(linhas.reduce((t, l) => t + l.valor, 0)), semConta: linhas.filter((l) => !l.debito || !l.credito).length };
+}
+
+/** Arquivo para o contador: CSV (;) ou TXT (|), data dd/mm/aaaa, valor com vírgula, uma linha por lançamento. */
+export function arquivoContabil(linhas, formato = 'csv') {
+  const sep = formato === 'txt' ? '|' : ';';
+  const campo = (v) => { const s = String(v ?? '').replace(/[\r\n]+/g, ' ').trim(); return formato === 'txt' ? s.replace(/\|/g, '/') : /[;"]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const cab = ['Data', 'Valor', 'Histórico', 'Conta Débito', 'Conta Crédito', 'Centro de Custo'];
+  return [cab, ...linhas.map((l) => [dataBR(l.data), r2(l.valor).toFixed(2).replace('.', ','), l.historico, l.debito, l.credito, l.centro])]
+    .map((r) => r.map(campo).join(sep)).join('\r\n') + '\r\n';
+}
+
+/* ---------- auditoria ---------- */
+export const TABELAS_AUDITORIA = {
+  fin_accounts: 'Plano de contas', fin_cost_centers: 'Centro de custo', fin_bank_accounts: 'Conta bancária', fin_entries: 'Lançamento da empresa',
+  fin_entry_splits: 'Rateio', fin_settlements: 'Baixa (pagamento/recebimento)', fin_bank_statements: 'Extrato importado', fin_bank_lines: 'Linha do extrato',
+  client_contracts: 'Contrato com cliente', contract_allowances: 'Verba com teto', service_invoices: 'Nota de serviço',
+  projects: 'Obra', budget_items: 'Orçamento', activity_measurements: 'Medição de atividade', daily_reports: 'Diário de obra', contracts: 'Contrato da obra',
+  contract_amendments: 'Aditivo', expenses: 'Custo da obra', payments: 'Pagamento de custo da obra', suppliers: 'Fornecedor', supplier_evaluations: 'Avaliação de fornecedor',
+  supplier_documents: 'Documento de fornecedor', purchase_orders: 'Pedido de compra', purchase_groups: 'Ordem de compra', purchase_items: 'Item de compra',
+  purchase_quotes: 'Cotação', purchase_deliveries: 'Entrega', purchase_delivery_items: 'Item entregue', purchase_files: 'Arquivo de compra', purchase_documents: 'Nota/pedido do fornecedor',
+  stock_items: 'Estoque', stock_moves: 'Movimento de estoque', material_transfers: 'Transferência de sobra', rdo_comments: 'Comentário do diário', rdo_media: 'Foto do diário',
+  workers: 'Trabalhador', worker_agreements: 'Acordo com trabalhador', measurement_sheets: 'Folha de medição', measurement_items: 'Item da medição',
+  measurement_workers: 'Trabalhador na medição', measurement_pay: 'Pagamento da medição', labor_contracts: 'Contrato de mão de obra', labor_contract_installments: 'Parcela de mão de obra',
+  labor_contract_items: 'Item do contrato de mão de obra', labor_measurements: 'Medição de mão de obra', labor_measurement_lines: 'Linha da medição', labor_payments: 'Pagamento de mão de obra',
+  org_pix_access: 'Acesso às chaves PIX', project_ai_reads: 'Leitura de projeto',
+};
+const CAMPOS_AUDITORIA = {
+  amount: 'Valor', description: 'Descrição', name: 'Nome', code: 'Código', due_date: 'Vencimento', competence: 'Competência', pay_date: 'Data do pagamento',
+  status: 'Situação', document: 'Documento', party_name: 'Favorecido', supplier_name: 'Fornecedor', account_id: 'Conta do plano', bank_account_id: 'Conta bancária',
+  method: 'Forma', paid_by: 'Quem pagou', notes: 'Observações', cancel_reason: 'Motivo do cancelamento', undo_reason: 'Motivo do estorno', deleted_at: 'Excluído/estornado em',
+  pct: 'Percentual', cost_center_id: 'Centro de custo', accounting_code: 'Conta contábil', accounting_name: 'Nome contábil', active: 'Ativo', opening_balance: 'Saldo inicial',
+  expense_date: 'Data', category: 'Categoria', quantity: 'Quantidade', unit_price: 'Preço unitário', memo: 'Histórico', note: 'Observação', settlement_id: 'Baixa ligada',
+  payment_id: 'Pagamento ligado', matched_label: 'Conciliado por', lines_new: 'Linhas novas', lines_total: 'Linhas no arquivo', extra: 'Dados da obra', client_funds: 'Por administração', regime: 'Regime', fee_kind: 'Taxa', fee_value: 'Valor da taxa', cap: 'Teto', issue_date: 'Emissão', number: 'Número',
+};
+const IGNORAR_AUDITORIA = new Set(['id', 'org_id', 'project_id', 'created_at', 'updated_at', 'created_by', 'created_label', 'matched_by', 'matched_at']);
+const DINHEIRO_AUDITORIA = new Set(['amount', 'opening_balance', 'cap', 'unit_price', 'contract_value', 'gross', 'net', 'withheld_total', 'inss_amount', 'iss_amount', 'ledger_balance']);
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const curto = (s) => (s.length > 120 ? `${s.slice(0, 117)}…` : s);
+const valorAudit = (v, k = '') => {
+  if (v == null || v === '') return '—';
+  if (typeof v === 'boolean') return v ? 'sim' : 'não';
+  if (DINHEIRO_AUDITORIA.has(k) && !Number.isNaN(Number(v))) return `R$ ${Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  if (typeof v === 'object') return curto(JSON.stringify(v));
+  if (UUID.test(v)) return '(vinculado)';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return dataBR(v);
+  if (/^\d{4}-\d{2}-\d{2}T/.test(v)) return `${dataBR(v.slice(0, 10))} ${v.slice(11, 16)}`;
+  return curto(String(v));
+};
+
+/** O que mudou num registro da auditoria: ação em palavras, o assunto e os campos alterados (antes → depois). */
+export function resumoAuditoria(reg) {
+  const a = reg.old_data || {}, d = reg.new_data || {};
+  const base = reg.action === 'DELETE' ? a : d;
+  const assunto = base.description || base.name || base.memo || base.supplier_name || base.party_name || base.document || base.number || '';
+  let acao = { INSERT: 'Criou', UPDATE: 'Alterou', DELETE: 'Apagou' }[reg.action] || reg.action;
+  if (reg.action === 'UPDATE' && !a.deleted_at && d.deleted_at) acao = reg.table_name === 'fin_settlements' || reg.table_name === 'payments' ? 'Estornou' : 'Excluiu';
+  else if (reg.action === 'UPDATE' && a.status !== 'cancelado' && d.status === 'cancelado') acao = 'Cancelou';
+  const campos = [];
+  if (reg.action === 'UPDATE') {
+    for (const k of new Set([...Object.keys(a), ...Object.keys(d)])) {
+      if (IGNORAR_AUDITORIA.has(k) || JSON.stringify(a[k]) === JSON.stringify(d[k])) continue;
+      campos.push({ campo: CAMPOS_AUDITORIA[k] || k, antes: valorAudit(a[k], k), depois: valorAudit(d[k], k) });
+    }
+  } else {
+    for (const k of ['amount', 'pay_date', 'due_date', 'status', 'document']) if (base[k] != null && base[k] !== '') campos.push({ campo: CAMPOS_AUDITORIA[k], antes: reg.action === 'DELETE' ? valorAudit(base[k], k) : '', depois: reg.action === 'DELETE' ? '' : valorAudit(base[k], k) });
+  }
+  return { acao, tabela: TABELAS_AUDITORIA[reg.table_name] || reg.table_name, assunto: String(assunto), campos };
+}
+
 /** Contas a pagar da empresa no formato da tela "Contas a pagar" (junto com as despesas das obras). */
 export function titulosParaContas(entradas, baixas, nomeCentro = () => '') {
   return (entradas || []).filter((e) => e.kind === 'pagar').map((e) => ({ e, s: saldoLancamento(e, baixas) }))

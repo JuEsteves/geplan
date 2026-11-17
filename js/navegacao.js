@@ -93,6 +93,9 @@ function menu() {
         { id: 'fin-dre', rotulo: 'DRE', href: '#/fin/dre', ico: 'fisico' },
         { id: 'fin-caixa', rotulo: 'Fluxo de caixa', href: '#/fin/caixa', ico: 'curva' },
         { id: 'fin-fiscal', rotulo: 'Fiscal', href: '#/fin/fiscal', ico: 'documentos' },
+        { id: 'fin-conciliacao', rotulo: 'Conciliação bancária', href: '#/fin/conciliacao', ico: 'tarefas' },
+        { id: 'fin-exportacao', rotulo: 'Exportação para o contador', href: '#/fin/exportacao', ico: 'documentos' },
+        { id: 'fin-auditoria', rotulo: 'Auditoria', href: '#/fin/auditoria', ico: 'tarefas' },
         { id: 'fin-cadastros', rotulo: 'Cadastros financeiros', href: '#/fin/cadastros', ico: 'config' },
       ] : []),
     ] }] : []),
@@ -118,7 +121,7 @@ export function itemAtivo(route) {
   if (route.name === 'suprimentos') return route.secao === 'entregas' ? 'sup-entregas' : 'sup-quadro';
   if (route.name === 'diario') return 'mod-diario';
   if (route.name === 'medicoes') return 'pagamentos';   // cadastro de profissionais e boletins antigos (consulta)
-  if (route.name === 'fin') return { cadastros: 'fin-cadastros', contratos: 'fin-contratos', prestacao: 'fin-contratos', dre: 'fin-dre', caixa: 'fin-caixa', fiscal: 'fin-fiscal' }[route.secao] || 'fin-lancamentos';
+  if (route.name === 'fin') return { cadastros: 'fin-cadastros', contratos: 'fin-contratos', prestacao: 'fin-contratos', dre: 'fin-dre', caixa: 'fin-caixa', fiscal: 'fin-fiscal', conciliacao: 'fin-conciliacao', exportacao: 'fin-exportacao', auditoria: 'fin-auditoria' }[route.secao] || 'fin-lancamentos';
   return route.name;
 }
 

@@ -13,12 +13,13 @@ import { ir } from './escopo.js';
 import {
   TIPOS_CONTA, REGIMES, FORMAS, SITUACOES, TIPOS_BANCO, arvoreContas, contasLancaveis, proximoCodigo, validarRateio, dividirIgual,
   ratearValor, saldoLancamento, resumoLancamentos, titulosParaContas, REGIMES_CONTRATO, TAXAS, prestacaoDeContas,
-  montarDRE, montarFluxo, mesesEntre, calcularRetencoes, sugestaoRetencoes, inssPorObra,
+  montarDRE, montarFluxo, mesesEntre, calcularRetencoes, sugestaoRetencoes, inssPorObra, lerOFX, sugerirConciliacao, resumoConta,
+  montarExportacao, arquivoContabil, resumoAuditoria,
 } from './financeiroEmpresaRegras.js';
 import { urlTemporaria } from './nuvem/arquivos.js';
 import { contexto } from './obra.js';
 
-const vazio = () => ({ carregado: false, carregando: false, erro: '', em: 0, contas: [], centros: [], bancos: [], entradas: [], splits: [], baixas: [], regime: '', contratos: [], verbas: [], notas: [] });
+const vazio = () => ({ carregado: false, carregando: false, erro: '', em: 0, contas: [], centros: [], bancos: [], entradas: [], splits: [], baixas: [], regime: '', contratos: [], verbas: [], notas: [], extratos: [], linhasBanco: [] });
 const F = vazio();
 const ctx = () => nuvem.contexto();
 const disponivel = () => nuvemConfigurada() && nuvem.ativo() && !!ctx()?.papel && veFinEmpresa();
@@ -35,7 +36,7 @@ export async function carregarFinEmpresa(forcar = false) {
   try {
     const c = await sb();
     const org = ctx().orgId;
-    const [contas, centros, bancos, entradas, splits, baixas, empresa, contratos, verbas, notas] = await Promise.all([
+    const [contas, centros, bancos, entradas, splits, baixas, empresa, contratos, verbas, notas, extratos, linhasBanco] = await Promise.all([
       c.from('fin_accounts').select('*').eq('org_id', org),
       c.from('fin_cost_centers').select('*').eq('org_id', org).order('name'),
       c.from('fin_bank_accounts').select('*').eq('org_id', org).order('name'),
@@ -46,7 +47,10 @@ export async function carregarFinEmpresa(forcar = false) {
       c.from('client_contracts').select('*').eq('org_id', org),
       c.from('contract_allowances').select('*').eq('org_id', org).order('position'),
       c.from('service_invoices').select('*').eq('org_id', org).order('issue_date', { ascending: false }),
+      c.from('fin_bank_statements').select('*').eq('org_id', org).order('created_at', { ascending: false }),
+      c.from('fin_bank_lines').select('*').eq('org_id', org).order('posted_date', { ascending: false }).limit(3000),
     ]);
+    F.extratos = ok(extratos, 'extratos') || []; F.linhasBanco = ok(linhasBanco, 'linhas do extrato') || [];
     F.contratos = ok(contratos, 'contratos') || []; F.verbas = ok(verbas, 'verbas') || []; F.notas = ok(notas, 'notas fiscais') || [];
     Object.assign(F, { contas: ok(contas, 'plano de contas') || [], centros: ok(centros, 'centros de custo') || [], bancos: ok(bancos, 'contas bancárias') || [],
       entradas: ok(entradas, 'lançamentos') || [], splits: ok(splits, 'rateio') || [], baixas: ok(baixas, 'baixas') || [],
@@ -198,13 +202,17 @@ export function viewFinEmpresa(route) {
       : route.secao === 'dre' ? ['DRE gerencial', 'Resultado da construtora por competência: receitas, deduções, custos das obras, despesas e resultado líquido.']
       : route.secao === 'caixa' ? ['Fluxo de caixa', 'Previsto × realizado, mês a mês ou dia a dia, com o saldo projetado — para saber se vai faltar caixa.']
       : route.secao === 'fiscal' ? ['Fiscal', 'Notas de serviço emitidas com retenções, notas de compra das obras e INSS por obra (CNO).']
+      : route.secao === 'conciliacao' ? ['Conciliação bancária', 'Importe o extrato do banco (OFX) e confira cada linha com os pagamentos e recebimentos lançados.']
+      : route.secao === 'exportacao' ? ['Exportação para o contador', 'Arquivo com os lançamentos do período (data, valor, histórico, conta débito, conta crédito e centro de custo) para importar na contabilidade.']
+      : route.secao === 'auditoria' ? ['Auditoria', 'Quem fez o quê e quando: cada criação, alteração, estorno e cancelamento, com o antes e o depois.']
       : ['Lançamentos da empresa', 'Contas a pagar e a receber do escritório e das obras, com rateio por centro de custo. Os custos lançados dentro de cada obra continuam em Custos da obra.'];
   if (!F.carregado) return `${cab(...t)}<div class="card empty"><p>${F.erro ? esc(F.erro) : 'Carregando…'}</p></div>`;
   if (route.secao === 'prestacao') return viewPrestacao(route.aba, route.mes);
   if (route.secao === 'contratos' && route.aba) return viewContrato(route.aba);
   const nav = '';
   const corpo = route.secao === 'cadastros' ? viewCadastros(route.aba || 'plano') : route.secao === 'contratos' ? viewContratos()
-    : route.secao === 'dre' ? viewDRE() : route.secao === 'caixa' ? viewCaixa() : route.secao === 'fiscal' ? viewFiscal(route.aba || 'saida') : viewLancamentos();
+    : route.secao === 'dre' ? viewDRE() : route.secao === 'caixa' ? viewCaixa() : route.secao === 'fiscal' ? viewFiscal(route.aba || 'saida') : route.secao === 'conciliacao' ? viewConciliacao()
+    : route.secao === 'exportacao' ? viewExportacao() : route.secao === 'auditoria' ? viewAuditoria() : viewLancamentos();
   return `${cab(...t)}${nav}<div class="stack" style="margin-top:12px">${F.erro ? `<div class="alert err">${esc(F.erro)}</div>` : ''}${ctx().papel === 'contador' ? '<div class="alert info small">Perfil contador: consulta e exportação. Lançamentos e cadastros ficam com o administrador e o financeiro.</div>' : ''}${corpo}</div>`;
 }
 
@@ -307,6 +315,186 @@ function abaRegime() {
     <div class="row" style="gap:10px;align-items:flex-end;flex-wrap:wrap"><label class="field" style="max-width:260px">Regime<select data-chg="finRegime" ${admin ? '' : 'disabled'}>${Object.entries(REGIMES).map(([k, l]) => `<option value="${k}" ${F.regime === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
       ${admin ? '' : '<span class="muted small">Só o administrador altera.</span>'}</div>
     <div class="small"><b>Simples Nacional:</b> os impostos sobre o faturamento saem num guia só (DAS, conta 2.1). <b>Lucro Presumido:</b> PIS, COFINS e ISS sobre o faturamento (contas 2.2 a 2.4) e IRPJ e CSLL sobre o lucro presumido (6.1 e 6.2). O regime define quais impostos aparecem na DRE e nas retenções das notas de serviço (próximas etapas). Confirme com o seu contador.</div></div>`;
+}
+
+/* ----- Conciliação bancária ----- */
+const bancoConc = () => { ui.finConc ||= {}; const ativos = F.bancos.filter((b) => b.active); if (!ativos.some((b) => b.id === ui.finConc.banco)) ui.finConc.banco = (ativos.find((b) => b.kind !== 'caixa') || ativos[0])?.id || ''; return bancoPorId(ui.finConc.banco); };
+/** Candidatos a conciliar com as linhas da conta: baixas da empresa nesta conta e pagamentos das despesas das obras. */
+function candidatosConc(banco) {
+  const ligadasB = new Set(F.linhasBanco.map((l) => l.settlement_id).filter(Boolean));
+  const ligadosP = new Set(F.linhasBanco.map((l) => l.payment_id).filter(Boolean));
+  const kind = new Map(F.entradas.map((e) => [e.id, e]));
+  const out = F.baixas.filter((b) => !b.deleted_at && b.bank_account_id === banco.id && !ligadasB.has(b.id)).map((b) => {
+    const e = kind.get(b.entry_id);
+    return { tipo: 'baixa', id: b.id, valor: (e?.kind === 'receber' ? 1 : -1) * Number(b.amount), data: b.pay_date, descricao: `${e?.description || ''}${e?.party_name ? ` — ${e.party_name}` : ''}` };
+  });
+  for (const o of store.obras()) for (const d of o.despesas || []) {
+    if (d.transferenciaId) continue;
+    for (const p of d.pagamentos || []) if (p.id && !ligadosP.has(p.id)) out.push({ tipo: 'pagamento', id: p.id, valor: -Number(p.valor), data: p.data, descricao: `${o.nome}: ${d.fornecedor || ''} ${d.documento || ''}`.trim() });
+  }
+  return out;
+}
+function viewConciliacao() {
+  const banco = bancoConc();
+  if (!banco) return '<div class="card empty"><p>Cadastre uma conta bancária em Cadastros financeiros.</p></div>';
+  const grava = gravaFinEmpresa();
+  const linhas = F.linhasBanco.filter((l) => l.bank_account_id === banco.id);
+  const pend = linhas.filter((l) => l.status === 'pendente');
+  const sug = sugerirConciliacao(pend, candidatosConc(banco));
+  const r = resumoConta(banco, { baixas: F.baixas, entradas: F.entradas, linhas: F.linhasBanco, extratos: F.extratos });
+  const ref = (l) => { if (l.settlement_id) { const b = F.baixas.find((x) => x.id === l.settlement_id); const e = b && F.entradas.find((x) => x.id === b.entry_id); return e ? esc(e.description) : 'baixa'; }
+    if (l.payment_id) { for (const o of store.obras()) for (const d of o.despesas || []) if ((d.pagamentos || []).some((p) => p.id === l.payment_id)) return `${esc(o.nome)}: ${esc(d.fornecedor || '')} ${esc(d.documento || '')}`; return 'pagamento de obra'; } return ''; };
+  const valor = (v) => `<span style="color:${v < 0 ? 'var(--crit)' : 'var(--good, inherit)'}">${fmtBRL(v)}</span>`;
+  return `<div class="row" style="gap:10px;flex-wrap:wrap;align-items:flex-end">
+      <label class="field" style="max-width:300px">Conta<select data-chg="finConcBanco">${F.bancos.filter((b) => b.active).map((b) => `<option value="${b.id}" ${b.id === banco.id ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select></label>
+      ${grava ? `<button class="btn primary" data-act="finImportarOfx">Importar extrato (OFX)</button>${sug.size ? `<button class="btn" data-act="finConciliarTodas">Conciliar as ${sug.size} sugestões</button>` : ''}` : ''}</div>
+    <div class="kpis">
+      <div class="card kpi"><div class="k-label">Saldo pelo sistema</div><div class="k-value" style="font-size:19px">${fmtBRL(r.sistema)}</div><div class="k-sub">saldo inicial + baixas nesta conta</div></div>
+      <div class="card kpi"><div class="k-label">Saldo do extrato</div><div class="k-value" style="font-size:19px">${r.extrato != null ? fmtBRL(r.extrato) : '—'}</div><div class="k-sub">${r.extratoData ? `em ${isoBR(r.extratoData)}` : 'importe um extrato'}</div></div>
+      <div class="card kpi"><div class="k-label">Diferença</div><div class="k-value" style="font-size:19px${r.diferenca ? ';color:var(--crit)' : ''}">${r.diferenca != null ? fmtBRL(r.diferenca) : '—'}</div><div class="k-sub">${r.diferenca ? 'algo do banco ainda não está no sistema (ou vice-versa)' : r.diferenca === 0 ? 'conta batendo' : ''}</div></div>
+      <div class="card kpi"><div class="k-label">Linhas do extrato</div><div class="k-value">${r.pendentes}</div><div class="k-sub">pendentes · ${r.conciliadas} conciliadas · ${r.ignoradas} ignoradas</div></div>
+    </div>
+    <h2 style="margin:6px 0 0">Pendentes</h2>
+    ${pend.length ? `<div class="card table-wrap"><table class="data"><thead><tr><th>Data</th><th>No extrato</th><th class="num">Valor</th><th>Sugestão do sistema</th><th></th></tr></thead><tbody>
+      ${pend.map((l) => { const s = sug.get(l.id); return `<tr><td class="nowrap">${isoBR(l.posted_date)}</td><td class="small">${esc(l.memo || '—')}${l.note ? `<div class="muted">${esc(l.note)}</div>` : ''}</td><td class="num nowrap">${valor(Number(l.amount))}</td>
+        <td class="small">${s ? `<span class="badge ${s.tipo === 'baixa' ? 'info' : ''}">${s.tipo === 'baixa' ? 'lançamento' : 'pagamento de obra'}</span> ${esc(s.descricao)}<div class="muted">${isoBR(s.data)}${s.dias ? ` · ${s.dias} dia(s) de diferença` : ' · mesma data'}</div>` : '<span class="muted">nenhum lançamento com este valor</span>'}</td>
+        <td class="nowrap">${grava ? `${s ? `<button class="btn sm primary" data-act="finConciliar" data-l="${l.id}" data-t="${s.tipo}" data-id="${s.id}">Conciliar</button> ` : ''}<button class="btn sm" data-act="finEscolherConc" data-l="${l.id}">Escolher</button> <button class="btn sm" data-act="finLancarLinha" data-l="${l.id}">Lançar</button> <button class="btn sm" data-act="finIgnorarLinha" data-l="${l.id}">Ignorar</button>` : ''}</td></tr>`; }).join('')}
+    </tbody></table></div>` : `<div class="card empty"><p>${linhas.length ? 'Tudo conciliado nesta conta.' : 'Nenhum extrato importado nesta conta.'}</p>${!linhas.length ? '<p class="small muted">No site do banco, exporte o extrato no formato OFX (às vezes chamado "Money" ou "Microsoft Money") e importe aqui.</p>' : ''}</div>`}
+    ${linhas.some((l) => l.status !== 'pendente') ? `<details><summary class="small"><b>Conciliadas e ignoradas</b> (${linhas.length - pend.length})</summary><div class="card table-wrap"><table class="data"><thead><tr><th>Data</th><th>No extrato</th><th class="num">Valor</th><th>Ligada a</th><th></th></tr></thead><tbody>
+      ${linhas.filter((l) => l.status !== 'pendente').slice(0, 200).map((l) => `<tr><td class="nowrap">${isoBR(l.posted_date)}</td><td class="small">${esc(l.memo || '')}</td><td class="num nowrap">${valor(Number(l.amount))}</td>
+        <td class="small">${l.status === 'ignorado' ? `<span class="badge">ignorada</span> ${esc(l.note)}` : ref(l)}<div class="muted">por ${esc(l.matched_label || '—')}</div></td>
+        <td>${grava ? `<button class="btn sm" data-act="finDesconciliar" data-l="${l.id}">Desfazer</button>` : ''}</td></tr>`).join('')}
+    </tbody></table></div></details>` : ''}
+    <div class="muted small">A sugestão junta linha e lançamento de <b>mesmo valor</b> com data até 5 dias de diferença (pagamentos e recebimentos da empresa nesta conta, ou pagamentos das notas das obras). "Lançar" cria o lançamento para o que só aparece no banco (tarifa, juros, rendimento) já pago e conciliado. Conciliado não se estorna nem se edita: desfaça a conciliação antes (com motivo). Extrato importado de novo não duplica linhas.</div>`;
+}
+async function importarOfx() {
+  const banco = bancoConc();
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = '.ofx,.OFX,application/x-ofx,text/plain';
+  inp.onchange = async () => {
+    const f = inp.files[0]; if (!f) return;
+    const texto = await f.text();
+    const x = lerOFX(texto);
+    if (x.erro) return toast(x.erro, 6000);
+    const ent = x.linhas.filter((l) => l.valor > 0).reduce((s, l) => s + l.valor, 0), sai = x.linhas.filter((l) => l.valor < 0).reduce((s, l) => s + l.valor, 0);
+    const conf = await formDialog({ title: `Importar ${f.name}`, ok: 'Importar',
+      text: `${x.linhas.length} lançamento(s) de ${isoBR(x.linhas.map((l) => l.data).sort()[0])} a ${isoBR(x.linhas.map((l) => l.data).sort().at(-1))} — entradas ${fmtBRL(ent)}, saídas ${fmtBRL(sai)}${x.saldo != null ? `, saldo ${fmtBRL(x.saldo)}` : ''}. Vai para a conta "${banco.name}"${x.conta ? ` (no arquivo: conta ${x.conta})` : ''}. Linhas já importadas antes ficam de fora.`,
+      fields: [] });
+    if (!conf) return;
+    const r = ok(await (await sb()).rpc('importar_extrato', { p_bank_account: banco.id, p_file_name: f.name, p_linhas: x.linhas, p_saldo: x.saldo, p_saldo_data: x.saldoData }), 'importar extrato');
+    await carregarFinEmpresa(true);
+    toast(`${r.novas} linha(s) nova(s)${r.repetidas ? `, ${r.repetidas} já importada(s)` : ''}.`, 5000);
+  };
+  inp.click();
+}
+
+/* ----- Exportação contábil ----- */
+const somaDiasISO = (iso, n) => { const d = new Date(`${iso}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+const XF = () => {
+  if (!ui.finExp) { const ant = somaMeses(todayISO().slice(0, 7), -1); ui.finExp = { de: `${ant}-01`, ate: fimDoMes(ant), banco: '', porCentro: '1', formato: 'csv' }; }
+  const ativos = F.bancos.filter((b) => b.active);
+  if (!ativos.some((b) => b.id === ui.finExp.banco)) ui.finExp.banco = (ativos.find((b) => b.kind !== 'caixa') || ativos[0])?.id || '';
+  return ui.finExp;
+};
+const PO = { chave: '', carregando: false, linhas: [], erro: '' };
+function pagamentosObras(de, ate) {
+  const chave = `${de}|${ate}|${F.em}`;
+  if (PO.chave !== chave && !PO.carregando) {
+    PO.carregando = true;
+    sb().then((c) => c.rpc('contabil_pagamentos_obras', { p_org: ctx().orgId, p_de: de, p_ate: ate }))
+      .then(({ data, error }) => { if (error) throw erroBanco(error, 'pagamentos das obras'); PO.linhas = (data || []).map((p) => ({ ...p, amount: Number(p.amount) })); PO.erro = ''; })
+      .catch((e) => { PO.erro = e.message; PO.linhas = []; })
+      .finally(() => { PO.chave = chave; PO.carregando = false; queueRender(); });
+  }
+  return PO.chave === chave ? PO.linhas : null;
+}
+function dadosExportacao() {
+  const f = XF();
+  const pag = pagamentosObras(f.de, f.ate);
+  if (!pag) return null;
+  return montarExportacao({ de: f.de, ate: f.ate, entradas: F.entradas, splits: F.splits, baixas: F.baixas, contas: F.contas, centros: F.centros, bancos: F.bancos,
+    pagObras: pag, bancoObras: f.banco, porCentro: f.porCentro === '1' });
+}
+function viewExportacao() {
+  const f = XF();
+  const x = dadosExportacao();
+  const sel = (k, opcoes) => `<select data-chg="finExp" data-k="${k}">${opcoes.map(([v, l]) => `<option value="${v}" ${f[k] === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+  const filtros = `<div class="row" style="gap:10px;flex-wrap:wrap;align-items:flex-end">
+      <label class="field" style="max-width:170px">De<input type="date" value="${f.de}" data-chg="finExp" data-k="de"></label>
+      <label class="field" style="max-width:170px">Até<input type="date" value="${f.ate}" data-chg="finExp" data-k="ate"></label>
+      <label class="field" style="max-width:280px">Conta que paga as obras${sel('banco', [['', '— escolha —'], ...F.bancos.filter((b) => b.active).map((b) => [b.id, b.name])])}</label>
+      <label class="field" style="max-width:240px">Rateio${sel('porCentro', [['1', 'Uma linha por centro de custo'], ['0', 'Uma linha por pagamento']])}</label>
+      <label class="field" style="max-width:200px">Formato${sel('formato', [['csv', 'CSV (Excel, ;)'], ['txt', 'TXT (separado por |)']])}</label>
+      ${x ? `<button class="btn primary" data-act="finBaixarContabil" ${x.linhas.length ? '' : 'disabled'}>Baixar arquivo</button>` : ''}</div>`;
+  if (PO.erro) return `${filtros}<div class="alert err">${esc(PO.erro)}</div>`;
+  if (!x) return `${filtros}<div class="card empty"><p>Carregando os pagamentos das obras…</p></div>`;
+  const prev = x.linhas.slice(0, 300).map((l) => `<tr><td class="nowrap">${isoBR(l.data)}</td><td class="num nowrap">${fmtBRL(l.valor)}</td><td class="small">${esc(l.historico)}${l.origem === 'obra' ? ' <span class="badge">obra</span>' : ''}</td>
+    <td class="small">${l.debito ? esc(l.debito) : '<span class="badge crit">sem conta</span>'}</td><td class="small">${l.credito ? esc(l.credito) : '<span class="badge crit">sem conta</span>'}</td><td class="small">${esc(l.centro || '—')}</td></tr>`).join('');
+  return `${filtros}
+    ${x.pendencias.length ? `<div class="alert warn small"><b>Antes de mandar ao contador, complete o De/Para</b> (Cadastros financeiros):<ul style="margin:6px 0 0 18px">${x.pendencias.map((p) => `<li>${esc(p)}</li>`).join('')}</ul></div>` : ''}
+    <div class="kpis">
+      <div class="card kpi"><div class="k-label">Lançamentos no arquivo</div><div class="k-value">${x.linhas.length}</div><div class="k-sub">${x.linhas.filter((l) => l.origem === 'obra').length} pagamentos de obras</div></div>
+      <div class="card kpi"><div class="k-label">Valor total</div><div class="k-value" style="font-size:19px">${fmtBRL(x.total)}</div><div class="k-sub">entradas e saídas somadas</div></div>
+      <div class="card kpi"><div class="k-label">Sem conta contábil</div><div class="k-value" style="${x.semConta ? 'color:var(--crit)' : ''}">${x.semConta}</div><div class="k-sub">${x.semConta ? 'débito ou crédito em branco' : 'tudo com De/Para'}</div></div>
+    </div>
+    ${prev ? `<div class="card table-wrap"><table class="data"><thead><tr><th>Data</th><th class="num">Valor</th><th>Histórico</th><th>Conta débito</th><th>Conta crédito</th><th>Centro de custo</th></tr></thead><tbody>${prev}</tbody></table></div>${x.linhas.length > 300 ? `<div class="muted small">Mostrando 300 de ${x.linhas.length}; o arquivo leva todos.</div>` : ''}`
+      : '<div class="card empty"><p>Nenhum pagamento ou recebimento no período.</p></div>'}
+    <div class="muted small">Regime de caixa: o que entrou e saiu das contas da empresa no período. Pagamento: débito na conta do plano (De/Para) e crédito no banco; recebimento: débito no banco e crédito na conta do plano. Pagamentos das obras vão na conta da categoria (por administração: 7.2, recursos do cliente) e saem da conta conciliada com o extrato ou, se não conciliados, da conta escolhida acima. Ficam de fora o que não é dinheiro: "cliente pagou direto" e as retenções das notas (veja Fiscal). Colunas: Data; Valor; Histórico; Conta Débito; Conta Crédito; Centro de Custo.</div>`;
+}
+function baixarContabil() {
+  const f = XF();
+  const x = dadosExportacao();
+  if (!x?.linhas.length) return toast('Nada para exportar no período.');
+  const txt = arquivoContabil(x.linhas, f.formato);
+  const blob = new Blob([f.formato === 'csv' ? `﻿${txt}` : txt], { type: f.formato === 'csv' ? 'text/csv;charset=utf-8' : 'text/plain;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `contabil-geplan-${f.de}-a-${f.ate}.${f.formato}`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  toast(`${x.linhas.length} lançamento(s) exportado(s)${x.semConta ? ` — ${x.semConta} sem conta contábil` : ''}.`, 5000);
+}
+
+/* ----- Auditoria ----- */
+const AF = () => (ui.finAud ||= { de: somaDiasISO(todayISO(), -30), ate: todayISO(), area: '', busca: '' });
+const AU = { chave: '', carregando: false, lista: [], erro: '' };
+function listaAuditoria(f) {
+  const chave = `${f.de}|${f.ate}|${f.area}|${F.em}`;
+  if (AU.chave !== chave && !AU.carregando) {
+    AU.carregando = true;
+    sb().then((c) => c.rpc('auditoria_listar', { p_org: ctx().orgId, p_de: f.de, p_ate: f.ate, p_area: f.area, p_limite: 500 }))
+      .then(({ data, error }) => { if (error) throw erroBanco(error, 'auditoria'); AU.lista = data || []; AU.erro = ''; })
+      .catch((e) => { AU.erro = e.message; AU.lista = []; })
+      .finally(() => { AU.chave = chave; AU.carregando = false; queueRender(); });
+  }
+  return AU.chave === chave ? AU.lista : null;
+}
+function viewAuditoria() {
+  const f = AF();
+  const admin = ctx().papel === 'admin';
+  if (!admin) f.area = '';
+  const filtros = `<div class="row" style="gap:10px;flex-wrap:wrap;align-items:flex-end">
+      <label class="field" style="max-width:170px">De<input type="date" value="${f.de}" data-chg="finAud" data-k="de"></label>
+      <label class="field" style="max-width:170px">Até<input type="date" value="${f.ate}" data-chg="finAud" data-k="ate"></label>
+      ${admin ? `<label class="field" style="max-width:220px">Área<select data-chg="finAud" data-k="area">${[['', 'Tudo'], ['financeiro', 'Financeiro da empresa'], ['obras', 'Obras (custos, diário, medições…)'], ['compras', 'Compras, fornecedores e estoque'], ['cadastros', 'Cadastros']]
+        .map(([v, l]) => `<option value="${v}" ${f.area === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>` : ''}
+      <label class="field" style="max-width:240px">Procurar<input type="search" value="${esc(f.busca)}" placeholder="pessoa, assunto, obra…" data-chg="finAud" data-k="busca"></label></div>`;
+  const lista = listaAuditoria(f);
+  if (AU.erro) return `${filtros}<div class="alert err">${esc(AU.erro)}</div>`;
+  if (!lista) return `${filtros}<div class="card empty"><p>Carregando…</p></div>`;
+  const b = f.busca.trim().toLowerCase();
+  const regs = lista.map((r) => ({ r, s: resumoAuditoria(r) }))
+    .filter(({ r, s }) => !b || `${r.quem} ${s.assunto} ${s.tabela} ${r.obra || ''} ${s.acao}`.toLowerCase().includes(b));
+  const quando = (t) => new Date(t).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+  const cor = { Criou: 'good', Alterou: 'info', Apagou: 'crit', Excluiu: 'crit', Estornou: 'warn', Cancelou: 'warn' };
+  const linhas = regs.map(({ r, s }) => `<tr><td class="nowrap small">${quando(r.changed_at)}</td><td class="small"><b>${esc(r.quem)}</b></td>
+    <td class="small"><span class="badge ${cor[s.acao] || ''}">${esc(s.acao)}</span> ${esc(s.tabela)}${r.obra ? `<div class="muted">${esc(r.obra)}</div>` : ''}</td>
+    <td class="small">${esc(s.assunto || '—')}</td>
+    <td class="small">${s.campos.slice(0, 6).map((c) => `<div><span class="muted">${esc(c.campo)}:</span> ${c.antes ? `<s>${esc(c.antes)}</s>` : ''}${c.antes && c.depois ? ' → ' : ''}${esc(c.depois)}</div>`).join('')}${s.campos.length > 6 ? `<div class="muted">+${s.campos.length - 6} campo(s)</div>` : ''}</td></tr>`).join('');
+  return `${filtros}
+    ${linhas ? `<div class="card table-wrap"><table class="data"><thead><tr><th>Quando</th><th>Quem</th><th>O quê</th><th>Assunto</th><th>O que mudou</th></tr></thead><tbody>${linhas}</tbody></table></div>`
+      : '<div class="card empty"><p>Nenhuma alteração neste período.</p></div>'}
+    <div class="muted small">${lista.length >= 500 ? 'Mostrando as 500 alterações mais recentes do período; diminua o período para ver as anteriores. ' : ''}A trilha é gravada pelo próprio banco a cada alteração e ninguém a altera nem apaga pelo app. ${admin ? 'O administrador vê tudo da empresa.' : 'Seu perfil vê as alterações do financeiro da empresa; o administrador vê tudo.'}</div>`;
 }
 
 /* ----- Fiscal ----- */
@@ -915,6 +1103,66 @@ export const acoesFinEmpresa = {
   finPrestacao(d) { ir(`#/fin/prestacao/${d.p}/${mesAtual()}`); },
   finImprimir() { window.print(); },
   async finNovaNf() { await formularioNotaServico(); },
+  async finImportarOfx() { await importarOfx(); },
+  finBaixarContabil() { baixarContabil(); },
+  async finConciliar(d) {
+    ok(await (await sb()).rpc('conciliar_linha', { p_line: d.l, p_settlement: d.t === 'baixa' ? d.id : null, p_payment: d.t === 'pagamento' ? d.id : null }), 'conciliar');
+    await carregarFinEmpresa(true);
+    toast('Linha conciliada.');
+  },
+  async finConciliarTodas() {
+    const banco = bancoConc();
+    const pend = F.linhasBanco.filter((l) => l.bank_account_id === banco.id && l.status === 'pendente');
+    const sug = sugerirConciliacao(pend, candidatosConc(banco));
+    const c = await sb();
+    let n = 0, falhas = 0;
+    for (const [linha, s] of sug) {
+      const { error } = await c.rpc('conciliar_linha', { p_line: linha, p_settlement: s.tipo === 'baixa' ? s.id : null, p_payment: s.tipo === 'pagamento' ? s.id : null });
+      if (error) falhas++; else n++;
+    }
+    await carregarFinEmpresa(true);
+    toast(`${n} linha(s) conciliada(s)${falhas ? `; ${falhas} não (confira uma a uma)` : ''}.`, 5000);
+  },
+  async finEscolherConc(d) {
+    const l = F.linhasBanco.find((x) => x.id === d.l);
+    const cands = candidatosConc(bancoConc()).filter((c) => Math.abs(c.valor - Number(l.amount)) <= 0.005)
+      .sort((a, b) => Math.abs(new Date(a.data) - new Date(l.posted_date)) - Math.abs(new Date(b.data) - new Date(l.posted_date)));
+    if (!cands.length) return toast('Nenhum lançamento com este valor. Use "Lançar" para criar um.', 5000);
+    const v = await formDialog({ title: `Conciliar ${fmtBRL(l.amount)} de ${isoBR(l.posted_date)}`, ok: 'Conciliar', text: l.memo || '',
+      fields: [{ name: 'c', label: 'Lançamento de mesmo valor', type: 'select', value: `${cands[0].tipo}|${cands[0].id}`,
+        options: cands.map((c) => ({ value: `${c.tipo}|${c.id}`, label: `${isoBR(c.data)} · ${c.tipo === 'baixa' ? '' : 'obra · '}${c.descricao}` })) }] });
+    if (!v) return;
+    const [t, id] = v.c.split('|');
+    await acoesFinEmpresa.finConciliar({ l: l.id, t, id });
+  },
+  async finLancarLinha(d) {
+    const l = F.linhasBanco.find((x) => x.id === d.l);
+    const kind = Number(l.amount) > 0 ? 'receber' : 'pagar';
+    const contas = contasLancaveis(F.contas, kind);
+    const padrao = contaPorCodigo(kind === 'pagar' ? '5.1' : '1.4');
+    const v = await formDialog({ title: `Lançar ${fmtBRL(l.amount)} de ${isoBR(l.posted_date)}`, ok: 'Lançar e conciliar', text: 'Para o que só aparece no banco (tarifa, juros, rendimento, IOF): cria o lançamento já pago nesta conta e concilia.',
+      fields: [{ name: 'desc', label: 'Descrição', value: l.memo || '' },
+        { name: 'conta', label: 'Conta', type: 'select', value: padrao?.id || contas[0]?.id, options: contas.map((c) => ({ value: c.id, label: `${c.code} ${c.name}` })) },
+        { name: 'cc', label: 'Centro de custo', type: 'select', value: F.centros.find((c) => c.kind === 'matriz')?.id, options: F.centros.filter((c) => c.active).map((c) => ({ value: c.id, label: nomeCentro(c) })) }] });
+    if (!v) return;
+    ok(await (await sb()).rpc('lancar_linha_extrato', { p_line: l.id, p_account: v.conta, p_cost_center: v.cc, p_description: v.desc.trim() }), 'lançar');
+    await carregarFinEmpresa(true);
+    toast('Lançado e conciliado.');
+  },
+  async finIgnorarLinha(d) {
+    const v = await formDialog({ title: 'Ignorar linha do extrato', ok: 'Ignorar', text: 'Use para o que não precisa de lançamento (ex.: transferência entre contas da própria empresa já lançada na outra conta).',
+      fields: [{ name: 'motivo', label: 'Motivo (obrigatório)', required: true }] });
+    if (!v) return;
+    ok(await (await sb()).rpc('ignorar_linha', { p_line: d.l, p_reason: v.motivo }), 'ignorar');
+    await carregarFinEmpresa(true);
+  },
+  async finDesconciliar(d) {
+    const v = await formDialog({ title: 'Desfazer conciliação', ok: 'Desfazer', text: 'A linha volta para pendente; o lançamento fica livre para ser corrigido ou estornado.',
+      fields: [{ name: 'motivo', label: 'Motivo (obrigatório)', required: true }] });
+    if (!v) return;
+    ok(await (await sb()).rpc('desconciliar_linha', { p_line: d.l, p_reason: v.motivo }), 'desfazer');
+    await carregarFinEmpresa(true);
+  },
   async finCancelarNf(d) {
     const n = F.notas.find((x) => x.id === d.id);
     const v = await formDialog({ title: `Cancelar NFS-e ${n.number}`, ok: 'Cancelar nota', text: 'Cancele também no portal da prefeitura. A conta a receber e a retenção são canceladas; fica no histórico.',
@@ -932,6 +1180,21 @@ export const acoesFinEmpresa = {
 };
 export const mudancasFinEmpresa = {
   finFiltro(d, el) { filtros()[d.k] = el.value; queueRender(); },
+  finConcBanco(d, el) { (ui.finConc ||= {}).banco = el.value; queueRender(); },
+  finExp(d, el) {
+    const f = XF();
+    if (['de', 'ate'].includes(d.k) && !el.value) return;
+    f[d.k] = el.value;
+    if (f.de > f.ate) f[d.k === 'de' ? 'ate' : 'de'] = el.value;
+    queueRender();
+  },
+  finAud(d, el) {
+    const f = AF();
+    if (['de', 'ate'].includes(d.k) && !el.value) return;
+    f[d.k] = el.value;
+    if (f.de > f.ate) f[d.k === 'de' ? 'ate' : 'de'] = el.value;
+    queueRender();
+  },
   finRel(d, el) {
     const f = R();
     f[d.k] = el.value;

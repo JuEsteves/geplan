@@ -111,6 +111,8 @@ export function resumoCustos(obra, { ateDia = null, aLancar = [] } = {}) {
   const comprometido = comprometidoContratos + avulsas.reduce((s, d) => s + (Number(d.valor) || 0), 0) + aLancarForaDeContrato;
   const incorrido = desp.reduce((s, d) => s + (Number(d.valor) || 0), 0);
   const pago = desp.reduce((s, d) => s + pagoDespesa(d), 0);
+  // transferência de material (sobra que entrou ou saiu) muda o custo da obra, mas não é conta a pagar
+  const transferido = desp.filter((d) => d.transferenciaId).reduce((s, d) => s + (Number(d.valor) || 0), 0);
   const aIncorrer = comps.reduce((s, c) => s + Math.max(0, compromissoEfetivo(c, porComp.get(c.id) || 0) - (porComp.get(c.id) || 0)), 0) + aLancarForaDeContrato;
   const alertas = [];
   for (const c of comps) {
@@ -120,7 +122,7 @@ export function resumoCustos(obra, { ateDia = null, aLancar = [] } = {}) {
   for (const d of desp) if (pagoDespesa(d) > (Number(d.valor) || 0) + 0.005) alertas.push(`Despesa ${d.documento || d.descricao}: pagamentos acima do valor.`);
   const porCategoria = new Map();
   for (const d of desp) porCategoria.set(d.categoria || 'Outro', (porCategoria.get(d.categoria || 'Outro') || 0) + (Number(d.valor) || 0));
-  return { comprometido, incorrido, pago, saldoAPagar: incorrido - pago, aIncorrer, aLancar: totalALancar, alertas, porCategoria: [...porCategoria.entries()], porComp };
+  return { comprometido, incorrido, pago, saldoAPagar: incorrido - transferido - pago, transferido, aIncorrer, aLancar: totalALancar, alertas, porCategoria: [...porCategoria.entries()], porComp };
 }
 
 /** Custos por fase (etapa raiz da EAP) — mesmas regras de `custos_por_fase` no banco (cabeçalho deste arquivo).
@@ -157,7 +159,7 @@ export function custosPorFase(obra, { totalItem = () => 0, ateDia = null, aLanca
 
   const L = new Map();
   const linha = (fase) => {
-    if (!L.has(fase)) L.set(fase, { orcado: 0, comprometido: 0, incorrido: 0, pago: 0, aLancar: 0 });
+    if (!L.has(fase)) L.set(fase, { orcado: 0, comprometido: 0, incorrido: 0, pago: 0, aLancar: 0, transferido: 0 });
     return L.get(fase);
   };
   const somar = (aloc, campo, valor) => { for (const x of aloc) linha(x.fase)[campo] += valor * x.share; };
@@ -183,6 +185,7 @@ export function custosPorFase(obra, { totalItem = () => 0, ateDia = null, aLanca
     const v = Number(d.valor) || 0;
     if (!d.compromissoId || !idsComps.has(d.compromissoId)) somar(aloc, 'comprometido', v);
     somar(aloc, 'incorrido', v);
+    if (d.transferenciaId) somar(aloc, 'transferido', v);   // sobra de material: custo, mas não conta a pagar
     somar(aloc, 'pago', (d.pagamentos || []).filter((p) => dentroObr(p.data)).reduce((s, p) => s + (Number(p.valor) || 0), 0));
   }
   if (!categoria || categoria === 'Mão de obra') {
@@ -199,8 +202,48 @@ export function custosPorFase(obra, { totalItem = () => 0, ateDia = null, aLanca
   for (const [f, v] of L) if (f != null && !porId.has(f)) fases.push({ id: f, codigo: '', descricao: '(fase não encontrada)', ...v });
   const sf = L.get(null);
   if (sf && Object.values(sf).some((x) => Math.abs(x) > 0.004)) fases.push({ id: null, codigo: '', descricao: 'Sem fase', ...sf });
-  const totais = fases.reduce((t, f) => { for (const k of Object.keys(t)) t[k] += f[k]; return t; }, { orcado: 0, comprometido: 0, incorrido: 0, pago: 0, aLancar: 0 });
+  const totais = fases.reduce((t, f) => { for (const k of Object.keys(t)) t[k] += f[k]; return t; }, { orcado: 0, comprometido: 0, incorrido: 0, pago: 0, aLancar: 0, transferido: 0 });
   return { fases, totais, semFase };
+}
+
+/** Previsão de custo final da obra, na conta de quem toca obra: o orçado, mais o que já se sabe que vai passar.
+ *  Em cada fase, "passou" = contratado e comprado acima do orçado da fase (gasto sem orçamento, como o da linha
+ *  "Sem fase", passa inteiro). Compra antecipada dentro do orçado não aumenta a previsão.
+ *  `pf` = custosPorFase(...) SEM filtro de data nem de categoria. */
+export function previsaoCustoFinal(pf) {
+  const acima = pf.fases.map((f) => ({ id: f.id, codigo: f.codigo, descricao: f.descricao, valor: Math.max(0, f.comprometido - f.orcado) })).filter((f) => f.valor > 0.005);
+  const estouro = acima.reduce((s, f) => s + f.valor, 0);
+  return { orcado: pf.totais.orcado, estouro, previsao: pf.totais.orcado + estouro, acima };
+}
+
+/** Contas a pagar de várias obras: cada despesa com saldo (valor − pagamentos), agrupada pelo vencimento.
+ *  Grupos: vencidas (antes de hoje) · semana (hoje + 7 dias) · mes (até 30 dias) · depois · semData (sem vencimento).
+ *  `hoje` = 'AAAA-MM-DD'. Ordenadas pelo vencimento (sem data por último). */
+export function contasAPagar(obras, hoje, extras = []) {
+  const mais = (n) => { const d = new Date(`${hoje}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+  const em7 = mais(7), em30 = mais(30);
+  const contas = [];
+  for (const o of obras || []) {
+    for (const d of o.despesas || []) {
+      if (d.transferenciaId) continue;   // sobra de material entre obras/estoque: não se paga
+      const valor = Number(d.valor) || 0, pago = pagoDespesa(d), saldo = valor - pago;
+      if (saldo <= 0.005) continue;
+      const v = d.vencimento || '';
+      const grupo = !v ? 'semData' : v < hoje ? 'vencidas' : v <= em7 ? 'semana' : v <= em30 ? 'mes' : 'depois';
+      contas.push({ obraId: o.id, obra: o.nome || '', despesaId: d.id, fornecedor: d.fornecedor || '', documento: d.documento || '', descricao: d.descricao || '',
+        categoria: d.categoria || 'Outro', data: d.data || '', vencimento: v, valor, pago, saldo, grupo });
+    }
+  }
+  // contas a pagar da empresa (escritório, salários, impostos…), já no mesmo formato
+  for (const x of extras || []) {
+    const v = x.vencimento || '';
+    if (!(x.saldo > 0.005)) continue;
+    contas.push({ ...x, grupo: !v ? 'semData' : v < hoje ? 'vencidas' : v <= em7 ? 'semana' : v <= em30 ? 'mes' : 'depois' });
+  }
+  contas.sort((a, b) => (a.vencimento || '9999').localeCompare(b.vencimento || '9999') || a.obra.localeCompare(b.obra));
+  const totais = { vencidas: 0, semana: 0, mes: 0, depois: 0, semData: 0, total: 0 };
+  for (const c of contas) { totais[c.grupo] += c.saldo; totais.total += c.saldo; }
+  return { contas, totais };
 }
 
 /** Despesa possivelmente duplicada (mesmo documento e fornecedor, ou mesmo valor/data/fornecedor). */

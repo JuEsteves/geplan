@@ -5,8 +5,8 @@ import { idObraDaRota } from './escopo.js';
 import { savedUser } from './drive.js';
 import { uid, registrar, CATEGORIAS_CUSTO, TIPOS_OCORRENCIA } from './model.js';
 import { avanco, fracPlanejada, pctRealAte, incorridoAte } from './curvaS.js';
-import { resumoOrcamento, resumoCustos, custosPorFase, totalCompromisso, compromissoEfetivo, COMPROMISSO_ENCERRADO, pagoDespesa, despesaDuplicada, valorAgregado } from './financeiro.js';
-import { medicoesALancar } from './nuvem/aLancar.js';
+import { resumoOrcamento, resumoCustos, custosPorFase, totalCompromisso, compromissoEfetivo, COMPROMISSO_ENCERRADO, pagoDespesa, despesaDuplicada, valorAgregado, previsaoCustoFinal } from './financeiro.js';
+import { medicoesALancar, indiretosRateados } from './nuvem/aLancar.js';
 import { quantidadePlanejada, metodoMedicao, medicoesDe, registrarMedicao, removerMedicao, pendenciasAbertas } from './execucao.js';
 import { toDay, toISO, fmtBR, isoBR, todayDay, todayISO, fmtNum, fmtBRL } from './schedule.js';
 import { esc, I, ui, toast, ask, info, formDialog, commit, queueRender, parseNum, fmtIn } from './ui.js';
@@ -53,7 +53,7 @@ export function tabPainel(c) {
   const av = avanco(o, calc, cron, hoje);
   const orc = resumoOrcamento(o, calc);
   const custos = resumoCustos(o, { aLancar: medicoesALancar(o.id) });
-  const va = valorAgregado({ bac: av.finTotal, pv: av.finPlan, ev: av.valorAgregado, ac: incorridoAte(o, hoje) });
+  const prev = previsaoCustoFinal(custosPorFase(o, { totalItem: (id) => calc.itens.get(id)?.total || 0, aLancar: medicoesALancar(o.id) }));
   const fl = folhas(c);
   const naEtapa = (n) => !etapaF || raizId(c, n.a) === etapaF;
   const atrasadas = atividadesAtrasadas(c, hoje, naEtapa);   // mesma regra da Visão geral (js/indicadores.js)
@@ -92,10 +92,10 @@ export function tabPainel(c) {
       ${card('Gasto', fmtBRL(custos.incorrido), `pago ${fmtBRL(custos.pago)} · a pagar ${fmtBRL(custos.saldoAPagar)}`)}
       ${card('Físico planejado (hoje)', `${fmtNum(av.fisicoPlan, 1)}%`, av.semPeso ? 'sem peso físico definido' : `peso: ${{ hh: 'HH', custo: 'custo', duracao: 'duração', manual: 'manual' }[o.pesoFisico || 'hh']}`)}
       ${card('Físico realizado', `${fmtNum(av.fisicoReal, 1)}%`, `desvio ${av.fisicoReal - av.fisicoPlan >= 0 ? '+' : ''}${fmtNum(av.fisicoReal - av.fisicoPlan, 1)} pts`, av.fisicoReal + 0.5 < av.fisicoPlan ? 'var(--crit)' : '')}
-      ${card('Financeiro realizado', `${fmtNum(av.financeiroPct, 1)}%`, 'incorrido ÷ custo planejado — não é avanço físico')}
-      ${card('Desvio de prazo', desvioPrazo == null ? (va.spi == null ? '—' : `SPI ${fmtNum(va.spi, 2)}`) : `${desvioPrazo > 0 ? '+' : ''}${desvioPrazo} ${cron.unidDias}`, desvioPrazo == null ? 'salve uma linha de base para comparar' : `término previsto ${fmtBR(cron.termino)}${va.spi != null ? ` · SPI ${fmtNum(va.spi, 2)}` : ''}`, desvioPrazo > 0 ? 'var(--crit)' : '')}
-      ${card('Desvio de custo', va.cpi == null ? '—' : `CPI ${fmtNum(va.cpi, 2)}`, va.cpi == null ? 'sem custo realizado ainda' : `VAC ${fmtBRL(va.vac)}`, va.cpi != null && va.cpi < 0.98 ? 'var(--crit)' : '')}
-      ${card('Previsão de custo final', fmtBRL(va.eac), 'EAC = realizado + (orçado − valor agregado)')}
+      ${card('Financeiro realizado', `${fmtNum(av.financeiroPct, 1)}%`, 'gasto ÷ custo planejado — não é avanço físico')}
+      ${card('Desvio de prazo', desvioPrazo == null ? '—' : `${desvioPrazo > 0 ? '+' : ''}${desvioPrazo} ${cron.unidDias}`, desvioPrazo == null ? 'salve uma linha de base para comparar' : `término previsto ${fmtBR(cron.termino)}`, desvioPrazo > 0 ? 'var(--crit)' : '')}
+      ${card('Desvio de custo', prev.estouro > 0.005 ? `+${fmtBRL(prev.estouro)}` : 'Dentro do orçado', prev.estouro > 0.005 ? `contratado ou gasto acima do orçado em ${prev.acima.length} etapa${prev.acima.length > 1 ? 's' : ''}` : 'nenhuma etapa passou do orçado', prev.estouro > 0.005 ? 'var(--crit)' : '')}
+      ${card('Previsão de custo final', fmtBRL(prev.previsao), 'orçado + o que passou do orçado')}
       ${card('Previsão de conclusão', o.eap.length ? fmtBR(cron.termino) : '—', `${cron.durTotal} ${cron.unidDias}${o.terminoPlanejado ? ` · planejado ${isoBR(o.terminoPlanejado)}` : ''}`)}
     </div>
     ${custos.alertas.length ? `<div class="alert err">${custos.alertas.map(esc).join('<br>')}</div>` : ''}
@@ -107,7 +107,7 @@ export function tabPainel(c) {
       <div class="card card-pad"><h2>Compras pendentes (${compras.length})</h2>${lista(compras.slice(0, 8).map((k) => `<li><b>${esc(k.objeto || k.fornecedor)}</b> <span class="badge">${esc(k.status || '')}</span>${k.dataNecessaria ? ` <span class="muted small">necessário em ${isoBR(k.dataNecessaria)}</span>` : ''}</li>`), 'Nenhum pedido de compra em aberto.')}<a class="small" href="#/obra/${o.id}/financeiro">Suprimentos →</a></div>
     </div>
     ${etapas.length ? `<div class="card table-wrap"><table class="data"><thead><tr><th>Etapa</th><th>Período</th><th class="num">Físico plan.</th><th class="num">Físico real</th><th></th><th class="num">Custo planejado</th></tr></thead><tbody>${linhaEtapa}</tbody></table></div>` : ''}
-    <div class="muted small">Indicadores calculados hoje (${fmtBR(hoje)}) a partir dos dados salvos. Físico = média ponderada do % medido (peso configurável); financeiro = custo incorrido ÷ custo planejado; CPI/SPI = índices de valor agregado (1,00 = no orçado/no prazo).</div>
+    <div class="muted small">Indicadores calculados hoje (${fmtBR(hoje)}) a partir dos dados salvos. Físico = média ponderada do % medido (peso configurável); financeiro = gasto ÷ custo planejado; desvio de custo = o que foi contratado ou gasto acima do orçado de cada etapa.</div>
   </div>`;
 }
 function raizId(c, a) { let x = a; while (x.parentId) x = c.porId.get(x.parentId); return x.id; }
@@ -206,13 +206,13 @@ function tabelaCustosFase(c, pf, diaEv) {
     return `<tr${f.id ? '' : ' class="sem-fase"'}><td>${f.id ? `${esc(f.codigo)} ${esc(f.descricao)}` : `<b>${esc(f.descricao)}</b>`}</td>
       <td class="num nowrap">${fmtBRL(f.orcado)}</td><td class="num nowrap">${ev == null ? '—' : fmtBRL(ev)}</td>
       <td class="num nowrap">${fmtBRL(f.comprometido)}</td><td class="num nowrap">${fmtBRL(f.incorrido)}<div class="small muted">${pct(f.incorrido, f.orcado)} do orçado</div></td>
-      <td class="num nowrap">${fmtBRL(f.pago)}</td><td class="num nowrap">${fmtBRL(f.incorrido - f.pago)}</td><td class="num nowrap">${f.aLancar ? fmtBRL(f.aLancar) : '—'}</td>
+      <td class="num nowrap">${fmtBRL(f.pago)}</td><td class="num nowrap">${fmtBRL(f.incorrido - (f.transferido || 0) - f.pago)}</td><td class="num nowrap">${f.aLancar ? fmtBRL(f.aLancar) : '—'}</td>
       <td style="min-width:110px">${f.id ? barra(fis, fin) : ''}<div class="small muted">${fis == null ? '' : `físico ${fmtNum(fis, 0)}%`}${fis != null && fin != null ? ' · ' : ''}${fin == null ? '' : `financ. ${fmtNum(fin, 0)}%`}</div></td></tr>`;
   }).join('');
   const t = pf.totais;
   return `<div class="card table-wrap"><table class="data custos-fase"><thead><tr><th>Fase da EAP</th><th class="num">Orçado</th><th class="num" title="Custo orçado das atividades × % já executado">Executado (valor)</th><th class="num" title="Contratos, pedidos e despesas avulsas">Contratado</th><th class="num" title="Notas e recibos lançados">Gasto</th><th class="num">Pago</th><th class="num">A pagar</th><th class="num">A lançar</th><th>Físico × financeiro</th></tr></thead>
     <tbody>${linhas || '<tr><td colspan="9" class="muted">Monte as fases da EAP para ver os custos por fase.</td></tr>'}</tbody>
-    <tfoot><tr><th>Total</th><th class="num nowrap">${fmtBRL(t.orcado)}</th><th class="num nowrap">${fmtBRL(evTot)}</th><th class="num nowrap">${fmtBRL(t.comprometido)}</th><th class="num nowrap">${fmtBRL(t.incorrido)}</th><th class="num nowrap">${fmtBRL(t.pago)}</th><th class="num nowrap">${fmtBRL(t.incorrido - t.pago)}</th><th class="num nowrap">${t.aLancar ? fmtBRL(t.aLancar) : '—'}</th><th></th></tr></tfoot></table></div>`;
+    <tfoot><tr><th>Total</th><th class="num nowrap">${fmtBRL(t.orcado)}</th><th class="num nowrap">${fmtBRL(evTot)}</th><th class="num nowrap">${fmtBRL(t.comprometido)}</th><th class="num nowrap">${fmtBRL(t.incorrido)}</th><th class="num nowrap">${fmtBRL(t.pago)}</th><th class="num nowrap">${fmtBRL(t.incorrido - (t.transferido || 0) - t.pago)}</th><th class="num nowrap">${t.aLancar ? fmtBRL(t.aLancar) : '—'}</th><th></th></tr></tfoot></table></div>`;
 }
 
 // etapas raiz; um nó mais interno já gravado (ex.: vindo de Suprimentos) continua na lista para não se perder ao salvar
@@ -230,6 +230,8 @@ export function tabFinanceiro(c) {
   const corte = ui.custosAte ? toDay(ui.custosAte) : null;
   const cat = ui.custosCat || '';
   const pf = custosPorFase(o, { totalItem: (id) => calc.itens.get(id)?.total || 0, ateDia: corte, aLancar, categoria: cat });
+  // previsão de custo final: sempre com todos os valores (não segue os filtros de data e categoria da tabela)
+  const prev = previsaoCustoFinal(corte == null && !cat ? pf : custosPorFase(o, { totalItem: (id) => calc.itens.get(id)?.total || 0, aLancar }));
   const itemNome = (id) => { const it = o.orcamento.find((x) => x.id === id); return it ? `${it.codigo} ${calc.itens.get(it.id).comp?.descricao || it.descricao || ''}` : ''; };
   const comps = (o.compromissos || []).map((k) => {
     const usado = r.porComp.get(k.id) || 0, tot = totalCompromisso(k), efetivo = compromissoEfetivo(k, usado);
@@ -244,10 +246,11 @@ export function tabFinanceiro(c) {
     const pago = pagoDespesa(d), k = (o.compromissos || []).find((x) => x.id === d.compromissoId);
     return `<tr><td class="nowrap">${isoBR(d.data)}</td><td>${esc(d.documento || '')}</td><td>${esc(d.fornecedor || '')}<div class="small muted">${esc(d.descricao || '')}</div></td>
       <td class="small">${esc(d.categoria || '')}${d.faseId ? `<div class="muted">Fase ${esc(nomeFase(o, d.faseId))}</div>` : ''}${k ? `<div class="muted">${esc(k.tipo)} ${esc(k.numero || k.fornecedor || '')}</div>` : ''}${d.itemId ? `<div class="muted">${esc(itemNome(d.itemId))}</div>` : ''}</td>
-      <td class="num nowrap">${fmtBRL(d.valor)}</td><td class="num nowrap">${fmtBRL(pago)}</td><td>${pago >= (Number(d.valor) || 0) - 0.005 ? '<span class="badge good">Paga</span>' : `<span class="badge warn">A pagar</span>${d.vencimento ? `<div class="small muted">vence ${isoBR(d.vencimento)}</div>` : ''}`}</td>
-      <td class="nowrap"><button class="icon-btn" data-act="despEditar" data-id="${d.id}" title="Editar / pagamentos">${I.more}</button></td></tr>`;
+      <td class="num nowrap">${fmtBRL(d.valor)}</td><td class="num nowrap">${d.transferenciaId ? '—' : fmtBRL(pago)}</td><td>${d.transferenciaId ? `<span class="badge info" title="Sobra de material: o custo mudou de obra; não é conta a pagar">${Number(d.valor) < 0 ? 'Sobra enviada' : 'Material recebido'}</span>` : pago >= (Number(d.valor) || 0) - 0.005 ? '<span class="badge good">Paga</span>' : `<span class="badge warn">A pagar</span>${d.vencimento ? `<div class="small muted">vence ${isoBR(d.vencimento)}</div>` : ''}`}</td>
+      <td class="nowrap"><button class="icon-btn" data-act="${d.transferenciaId ? 'despTransf' : 'despEditar'}" data-id="${d.id}" title="${d.transferenciaId ? 'Transferência de material' : 'Editar / pagamentos'}">${I.more}</button></td></tr>`;
   }).join('');
   const kpi = (t, v, s = '') => `<div class="card kpi"><div class="k-label">${t}</div><div class="k-value" style="font-size:19px">${v}</div>${s ? `<div class="k-sub">${s}</div>` : ''}</div>`;
+  const ind = indiretosRateados(o.id);   // só o total: quem vê a obra não vê salário nem o financeiro da empresa
   return `<div class="stack">
     <div class="kpis">
       ${kpi('Custo orçado', fmtBRL(orc.custoDireto), isFinite(orc.bdi) && orc.bdi ? `venda ${fmtBRL(orc.precoVenda)}` : 'sem BDI')}
@@ -257,7 +260,9 @@ export function tabFinanceiro(c) {
       ${kpi('Pago', fmtBRL(r.pago), `a pagar ${fmtBRL(r.saldoAPagar)}`)}
       ${kpi('Ainda a gastar', fmtBRL(r.aIncorrer), r.aLancar ? 'saldo dos contratos e pedidos + medições a lançar' : 'saldo dos contratos e pedidos')}
       ${r.aLancar ? kpi('Medições a lançar', fmtBRL(r.aLancar), 'aprovadas, ainda sem despesa no Financeiro') : ''}
-      ${kpi('Previsão de custo final', fmtBRL(va.eac), va.cpi == null ? 'igual ao orçado até haver gasto' : !(va.ev > 0) ? 'gasto até hoje + orçado (ainda sem avanço medido)' : va.vac < -0.005 ? `${fmtBRL(-va.vac)} acima do orçado` : va.vac > 0.005 ? `${fmtBRL(va.vac)} abaixo do orçado` : 'dentro do orçado')}
+      ${kpi('Previsão de custo final', fmtBRL(prev.previsao), prev.estouro > 0.005 ? `${fmtBRL(prev.estouro)} acima do orçado, em ${prev.acima.length} etapa${prev.acima.length > 1 ? 's' : ''}` : 'dentro do orçado')}
+      ${ind && ind.empresa > 0.005 ? kpi('Indiretos rateados da empresa', fmtBRL(ind.empresa), `parte de ${ind.lancamentos} lançamento(s) da empresa atribuída a esta obra · fora do gasto acima`) : ''}
+      ${ind && ind.clienteDireto > 0.005 ? kpi('Pago pelo cliente direto', fmtBRL(ind.clienteDireto), 'lançado no financeiro da empresa (obra por administração)') : ''}
     </div>
     ${r.alertas.length ? `<div class="alert err">${r.alertas.map(esc).join('<br>')}</div>` : ''}
     <div class="row" id="secao-fases" style="flex-wrap:wrap;gap:10px;align-items:flex-end"><h2 style="flex:1;min-width:200px;margin:0">Custos por fase</h2>
@@ -274,7 +279,7 @@ export function tabFinanceiro(c) {
     <div class="grid-2">
       <div class="card table-wrap"><table class="data"><thead><tr><th>Categoria</th><th class="num">Gasto</th></tr></thead><tbody>${r.porCategoria.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${fmtBRL(v)}</td></tr>`).join('') || '<tr><td colspan="2" class="muted">Sem despesas.</td></tr>'}</tbody></table></div>
     </div>
-    <div class="muted small"><b>Nada é contado duas vezes:</b> a despesa ligada a um contrato ou pedido abate o saldo dele (não soma de novo no contratado). Contrato ou pedido cancelado ou encerrado conta só o que já foi gasto nele. Medição aprovada entra como "a lançar" até virar despesa. Empreitada só entra quando medida. Material recebido sem nota ainda não é gasto (Suprimentos acompanha o pedido). Previsão de custo final = gasto até hoje + o que falta executar pelo valor orçado.</div>
+    <div class="muted small"><b>Nada é contado duas vezes:</b> a despesa ligada a um contrato ou pedido abate o saldo dele (não soma de novo no contratado). Contrato ou pedido cancelado ou encerrado conta só o que já foi gasto nele. Medição aprovada entra como "a lançar" até virar despesa. Empreitada só entra quando medida. Material recebido sem nota ainda não é gasto (Suprimentos acompanha o pedido). Previsão de custo final = orçado + o que já foi contratado ou gasto acima do orçado de cada etapa (gasto sem etapa ou sem orçamento entra inteiro).</div>
   </div>`;
 }
 
@@ -411,6 +416,7 @@ export const acoesGestao = {
   custosLimpar() { ui.custosAte = ''; ui.custosCat = ''; queueRender(); },
   compNovo(d) { const o = obraAtual(); dialogoCompromisso(o, contexto(o), { id: uid(), tipo: d.t, status: d.t === 'Contrato' ? 'Aprovado' : 'Em cotação', categoria: d.t === 'Contrato' ? 'Serviço terceirizado' : 'Material', aditivos: [] }, true); },
   compEditar(d) { const o = obraAtual(); dialogoCompromisso(o, contexto(o), o.compromissos.find((x) => x.id === d.id), false); },
+  despTransf() { info('Transferência de material', '<p>Esta linha é uma sobra de material que mudou de obra (ou foi para o estoque), com o custo junto. Para desfazer, cancele a transferência em <a href="#/estoque" onclick="document.getElementById(\'dlg\').close()">Suprimentos › Estoque e sobras</a>.</p>'); },
   despNova() { const o = obraAtual(); dialogoDespesa(o, contexto(o), { id: uid(), categoria: 'Material', pagamentos: [] }, true); },
   despEditar(d) { const o = obraAtual(); dialogoDespesa(o, contexto(o), o.despesas.find((x) => x.id === d.id), false); },
 };

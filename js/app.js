@@ -14,10 +14,12 @@ import * as conta from './nuvem/conta.js';
 import * as nuvem from './nuvem/nuvem.js';
 import { viewEmpresa, acoesEmpresa, mudancasEmpresa, limparEmpresa } from './nuvem/telaEmpresa.js';
 import { renderMenu, viewModulo, MODULOS, obraUnica, linkModulo } from './navegacao.js';
-import { viewInicio, viewPendencias, resumoDe, entradasInicio, mudancasInicio } from './inicio.js';
+import { viewInicio, viewPendencias, viewContasAPagar, resumoDe, entradasInicio, mudancasInicio } from './inicio.js';
 import { viewConfiguracoes } from './configuracoes.js';
 import { viewFornecedores, viewFornecedor, acoesFornecedores, entradasFornecedores, mudancasFornecedores, limparFornecedores } from './fornecedores.js';
 import { viewSuprimentos, acoesSuprimentos, mudancasSuprimentos, entradasSuprimentos, limparSuprimentos } from './suprimentos.js';
+import { viewFinEmpresa, acoesFinEmpresa, mudancasFinEmpresa, limparFinEmpresa } from './financeiroEmpresa.js';
+import { viewEstoque, acoesEstoque, limparEstoque } from './estoque.js';
 import { liberacoesDe } from './liberacoes.js';
 import { viewDiario, acoesDiario, mudancasDiario, entradasDiario, depoisDiario, limparDiario, formRdoSujo } from './diario.js';
 import { viewMedicoes, acoesMedicoes, mudancasMedicoes, entradasMedicoes, limparMedicoes } from './medicoes.js';
@@ -211,7 +213,7 @@ async function sairNuvem() {
   if (nuvem.pendente()) await nuvem.enviar().catch(() => {});
   if (nuvem.pendente() && !(await ask('Há alterações que ainda NÃO foram enviadas para a nuvem e serão perdidas. Sair mesmo assim?', 'Sair'))) return;
   await conta.sair().catch(() => {});
-  nuvem.encerrar(); store.clearLocal(); limparEmpresa(); limparFornecedores(); limparSuprimentos(); limparDiario(); limparMedicoes(); limparBases(); limparContratos(); limparMedicao();
+  nuvem.encerrar(); store.clearLocal(); limparEmpresa(); limparFornecedores(); limparSuprimentos(); limparDiario(); limparMedicoes(); limparBases(); limparContratos(); limparMedicao(); limparFinEmpresa(); limparEstoque();
   sessaoAtual = null; authorized = false;
   location.hash = '#/inicio';
   renderGateNuvem('entrar');
@@ -221,7 +223,7 @@ window.addEventListener('geplan:aviso', (e) => toast(e.detail, 7000));
 window.addEventListener('geplan:trocar-empresa', async (e) => {
   await nuvem.enviar().catch(() => {});
   if (nuvem.pendente() && !(await ask('Há alterações não enviadas nesta empresa. Trocar mesmo assim (elas serão perdidas)?', 'Trocar'))) return queueRender();
-  nuvem.encerrar(); store.clearLocal(); limparFornecedores(); limparSuprimentos(); limparDiario(); limparMedicoes(); limparBases(); limparContratos(); limparMedicao();
+  nuvem.encerrar(); store.clearLocal(); limparFornecedores(); limparSuprimentos(); limparDiario(); limparMedicoes(); limparBases(); limparContratos(); limparMedicao(); limparFinEmpresa(); limparEstoque();
   location.hash = '#/inicio';
   await entrarNaEmpresa(e.detail);
 });
@@ -238,12 +240,13 @@ function parseRoute() {
   if (parts[0] === 'fornecedores') return parts[1] ? { name: 'fornecedor', id: parts[1] } : { name: 'fornecedores' };
   if (parts[0] === 'medicoes') return { name: 'medicoes', secao: parts[1] || 'boletins', id: parts[2] || '' };
   if (parts[0] === 'pagamentos') return { name: 'pagamentos', secao: parts[1] || 'semana' };
+  if (parts[0] === 'fin') return { name: 'fin', secao: ['cadastros', 'contratos', 'prestacao', 'dre', 'caixa', 'fiscal'].includes(parts[1]) ? parts[1] : 'lancamentos', aba: parts[2] || '', mes: parts[3] || '' };
   if (parts[0] === 'diario') return { name: 'diario', obra: parts[1] || '', secao: parts[2] || 'geral', id: parts[3] || '', modo: parts[4] || '' };
   if (parts[0] === 'suprimentos') {
     if (parts[1] === 'pedido' && parts[2]) return { name: 'suprimentos', secao: 'pedido', id: parts[2], aba: parts[3] || 'resumo' };
     return { name: 'suprimentos', secao: parts[1] === 'entregas' ? 'entregas' : 'quadro' };
   }
-  if (['obras', 'composicoes', 'drive', 'importar', 'sinapi', 'pendencias', 'inicio', 'configuracoes'].includes(parts[0])) return { name: parts[0] };
+  if (['obras', 'composicoes', 'drive', 'importar', 'sinapi', 'pendencias', 'inicio', 'configuracoes', 'contas', 'estoque'].includes(parts[0])) return { name: parts[0] };
   return { name: 'inicio' };   // página inicial: Visão geral
 }
 
@@ -280,6 +283,9 @@ function render() {
   let html;
   if (route.name === 'inicio') html = viewInicio();
   else if (route.name === 'pendencias') html = viewPendencias();
+  else if (route.name === 'contas') html = viewContasAPagar();
+  else if (route.name === 'fin') html = viewFinEmpresa(route);
+  else if (route.name === 'estoque') html = viewEstoque();
   else if (route.name === 'configuracoes') html = viewConfiguracoes();
   else if (route.name === 'fornecedores') html = viewFornecedores();
   else if (route.name === 'fornecedor') html = viewFornecedor(route);
@@ -405,8 +411,8 @@ const mudancasGerais = {
 };
 
 /* ---------- eventos ---------- */
-const acoes = { ...acoesGerais, ...acoesBiblioteca, ...acoesObra, ...acoesFases, ...acoesSinapi, ...acoesGestao, ...acoesEmpresa, ...acoesFornecedores, ...acoesSuprimentos, ...acoesDiario, ...acoesMedicoes, ...acoesBases, ...acoesContratos, ...acoesMedicao };
-const mudancas = { ...mudancasGerais, ...mudancasBiblioteca, ...mudancasObra, ...mudancasFases, ...mudancasSinapi, ...mudancasGestao, ...mudancasEmpresa, ...mudancasInicio, ...mudancasFornecedores, ...mudancasSuprimentos, ...mudancasDiario, ...mudancasMedicoes, ...mudancasBases, ...mudancasContratos, ...mudancasMedicao };
+const acoes = { ...acoesGerais, ...acoesBiblioteca, ...acoesObra, ...acoesFases, ...acoesSinapi, ...acoesGestao, ...acoesEmpresa, ...acoesFornecedores, ...acoesSuprimentos, ...acoesDiario, ...acoesMedicoes, ...acoesBases, ...acoesContratos, ...acoesMedicao, ...acoesFinEmpresa, ...acoesEstoque };
+const mudancas = { ...mudancasGerais, ...mudancasBiblioteca, ...mudancasObra, ...mudancasFases, ...mudancasSinapi, ...mudancasGestao, ...mudancasEmpresa, ...mudancasInicio, ...mudancasFornecedores, ...mudancasSuprimentos, ...mudancasDiario, ...mudancasMedicoes, ...mudancasBases, ...mudancasContratos, ...mudancasMedicao, ...mudancasFinEmpresa };
 const entradas = { ...entradasBiblioteca, ...entradasObra, ...entradasModulo, ...entradasFases, ...entradasSinapi, ...entradasInicio, ...entradasFornecedores, ...entradasSuprimentos, ...entradasDiario, ...entradasMedicoes, ...entradasBases };
 
 // seções recolhíveis e grupos do menu: lembra aberto/fechado (preferência de tela, só neste navegador)

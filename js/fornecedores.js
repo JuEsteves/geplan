@@ -10,7 +10,7 @@ import * as nuvem from './nuvem/nuvem.js';
 import { enviarArquivo, urlTemporaria, ACCEPT, tamanhoLegivel, validarArquivo } from './nuvem/arquivos.js';
 import { docValido, formatarDoc, tipoDoc, soDigitos, emailValido, UFS, normalizar } from './validacao.js';
 import { liberado } from './permissoes.js';
-import { indicadoresEntrega, OCORRENCIAS } from './suprimentosRegras.js';
+import { indicadoresEntrega, OCORRENCIAS, itensDoFornecedor, codigoOC } from './suprimentosRegras.js';
 
 const CRITERIOS = [['punctuality', 'Pontualidade'], ['quantity_ok', 'Conformidade da quantidade'], ['quality', 'Qualidade do material'],
   ['service', 'Atendimento'], ['issue_resolution', 'Resolução de ocorrências']];
@@ -63,7 +63,7 @@ async function carregarFicha(id, forcar = false) {
     const ids = store.obras().map((o) => o.id);
     const nada = { data: [] };
     const colsCot = 'id, status, project_id, supplier_id, supplier_name, total_amount, freight_amount, lead_days, created_at';
-    const colsGr = 'id, order_id, supplier_id, supplier_name, expected_date';
+    const colsGr = 'id, order_id, project_id, supplier_id, supplier_name, expected_date, status, contract_id, purchase_date, amount, freight, name, letter';
     const [av, docs, cots, cotsSemVinculo, grs, grsSemVinculo] = await Promise.all([
       c.from('supplier_evaluations').select('*').eq('supplier_id', id).order('created_at', { ascending: false }),
       c.from('supplier_documents').select('*').eq('supplier_id', id).is('deleted_at', null).order('created_at', { ascending: false }),
@@ -76,17 +76,23 @@ async function carregarFicha(id, forcar = false) {
     const cotacoes = [...(ok(cots, 'cotações') || []), ...daqui(ok(cotsSemVinculo, 'cotações'))];
     // entregas dos grupos comprados deste fornecedor; limite do prazo = data necessária do pedido (ou a previsão do grupo)
     const grupos = [...(ok(grs, 'grupos') || []), ...daqui(ok(grsSemVinculo, 'grupos'))];
-    let entregas = [], limites = new Map();
+    let entregas = [], limites = new Map(), itens = new Map(), notas = [], pedidos = new Map();
     if (grupos.length) {
-      const [ents, peds] = await Promise.all([
-        c.from('purchase_deliveries').select('*').in('group_id', grupos.map((g) => g.id)).is('deleted_at', null),
-        c.from('purchase_orders').select('id, needed_date').in('id', [...new Set(grupos.map((g) => g.order_id))]),
+      const gids = grupos.map((g) => g.id);
+      const [ents, peds, its, nfs] = await Promise.all([
+        c.from('purchase_deliveries').select('*').in('group_id', gids).is('deleted_at', null),
+        c.from('purchase_orders').select('id, number, needed_date').in('id', [...new Set(grupos.map((g) => g.order_id))]),
+        c.from('purchase_items').select('id, group_id, description, quantity, unit, unit_price').in('group_id', gids),
+        c.from('purchase_documents').select('*').in('group_id', gids).is('deleted_at', null).order('issue_date', { ascending: false }),
       ]);
       entregas = ok(ents, 'entregas') || [];
-      const nec = new Map((ok(peds, 'pedidos') || []).map((p) => [p.id, p.needed_date]));
-      limites = new Map(grupos.map((g) => [g.id, nec.get(g.order_id) || g.expected_date || '']));
+      const ps = ok(peds, 'pedidos') || [];
+      pedidos = new Map(ps.map((p) => [p.id, p]));
+      limites = new Map(grupos.map((g) => [g.id, pedidos.get(g.order_id)?.needed_date || g.expected_date || '']));
+      for (const i of ok(its, 'itens') || []) { if (!itens.has(i.group_id)) itens.set(i.group_id, []); itens.get(i.group_id).push(i); }
+      notas = ok(nfs, 'notas') || [];
     }
-    F.fichas.set(id, { carregando: false, avaliacoes: ok(av, 'avaliações') || [], documentos: ok(docs, 'documentos') || [], cotacoes, entregas, limites });
+    F.fichas.set(id, { carregando: false, avaliacoes: ok(av, 'avaliações') || [], documentos: ok(docs, 'documentos') || [], cotacoes, entregas, limites, grupos, itens, notas, pedidos });
   } catch (e) { F.fichas.set(id, { carregando: false, erro: e.message, avaliacoes: [], documentos: [], cotacoes: [], entregas: [], limites: new Map() }); }
   queueRender();
 }
@@ -182,6 +188,39 @@ export function viewFornecedores() {
 const campo = (rot, val) => (val ? `<div><span class="muted small">${rot}</span><div>${val}</div></div>` : '');
 const simNao = (v) => (v == null ? '' : v ? 'Sim' : 'Não');
 
+/** Compras feitas em Suprimentos com este fornecedor: o que foi comprado, preço de cada material ao longo do tempo,
+ *  notas fiscais × valor das compras. Base para decidir se vale manter o fornecedor. */
+function secaoItensComprados(ficha) {
+  if (ficha.carregando) return '';
+  const grupos = ficha.grupos || [];
+  const { linhas, materiais } = itensDoFornecedor(grupos, ficha.itens || new Map(), (pid) => store.obra(pid)?.nome || 'obra');
+  const comprados = grupos.filter((g) => g.contract_id && g.status !== 'cancelado');
+  if (!comprados.length) return '';
+  const totalCompras = comprados.reduce((s, g) => s + (Number(g.amount) || 0) + (Number(g.freight) || 0), 0);
+  const notas = ficha.notas || [];
+  const totalNotas = notas.reduce((s, d) => s + (Number(d.amount) || 0), 0);
+  const semNota = comprados.filter((g) => !notas.some((d) => d.group_id === g.id)).length;
+  const cod = (g) => { const p = ficha.pedidos?.get(g.order_id); return p ? codigoOC(p.number, g.letter) : ''; };
+  const porGrupo = new Map(grupos.map((g) => [g.id, g]));
+  const varia = (m) => (m.menor != null && m.maior != null && m.maior > m.menor ? `<span class="badge warn" title="Diferença entre o menor e o maior preço pago">+${fmtNum((m.maior / m.menor - 1) * 100, 0)}%</span>` : '');
+  return `<div class="card card-pad stack"><h2>Itens comprados e preços</h2>
+    <div class="kpis">
+      <div class="card kpi"><div class="k-label">Compras registradas</div><div class="k-value" style="font-size:20px">${fmtBRL(totalCompras)}</div><div class="k-sub">${comprados.length} ordem(ns) de compra · materiais + frete</div></div>
+      <div class="card kpi"><div class="k-label">Notas e documentos</div><div class="k-value" style="font-size:20px">${fmtBRL(totalNotas)}</div><div class="k-sub">${notas.length} documento(s)${semNota ? ` · ${semNota} compra(s) sem nota` : ''}</div></div>
+      <div class="card kpi"><div class="k-label">Materiais diferentes</div><div class="k-value">${materiais.length}</div><div class="k-sub">${linhas.filter((l) => l.unit_price != null).length} de ${linhas.length} linha(s) com preço por item</div></div>
+    </div>
+    ${materiais.length ? `<details open><summary class="small"><b>Preço por material</b></summary><div class="table-wrap"><table class="data"><thead><tr><th>Material</th><th class="num">Comprado</th><th class="num">Compras</th><th class="num">Menor</th><th class="num">Maior</th><th class="num">Último</th></tr></thead><tbody>
+      ${materiais.map((m) => `<tr><td>${esc(m.description)}</td><td class="num nowrap">${fmtNum(m.quantity, 2)} ${esc(m.unit)}</td><td class="num">${m.compras}</td>
+        <td class="num nowrap">${m.menor != null ? fmtBRL(m.menor) : '—'}</td><td class="num nowrap">${m.maior != null ? fmtBRL(m.maior) : '—'} ${varia(m)}</td>
+        <td class="num nowrap">${m.ultimo != null ? `${fmtBRL(m.ultimo)}<div class="muted small">${m.ultimaData ? isoBR(m.ultimaData) : ''}</div>` : '—'}</td></tr>`).join('')}
+    </tbody></table></div></details>` : ''}
+    ${notas.length ? `<details><summary class="small"><b>Notas fiscais e documentos</b> (${notas.length})</summary><div class="table-wrap"><table class="data"><thead><tr><th>Data</th><th>Documento</th><th>Ordem de compra</th><th>Obra</th><th class="num">Valor</th></tr></thead><tbody>
+      ${notas.map((d) => { const g = porGrupo.get(d.group_id); return `<tr><td class="nowrap">${isoBR(d.issue_date)}</td><td>${esc({ nota_fiscal: 'NF', pedido_fornecedor: 'Pedido', recibo: 'Recibo' }[d.kind])} ${esc(d.number)}${d.series ? `/${esc(d.series)}` : ''}</td>
+        <td class="small"><a href="#/suprimentos/pedido/${d.order_id}/compras">${esc(g ? cod(g) : '')}</a> ${esc(g?.name || '')}</td><td class="small">${esc(store.obra(d.project_id)?.nome || '')}</td><td class="num nowrap">${fmtBRL(d.amount)}</td></tr>`; }).join('')}
+    </tbody></table></div></details>` : ''}
+    <div class="muted small">Das ordens de compra registradas em Suprimentos com este fornecedor, nas obras que você pode ver. O preço por item é o informado na compra; material igual = mesma descrição e unidade.</div></div>`;
+}
+
 export function viewFornecedor(route) {
   if (!disponivel()) return indisponivel();
   if (!F.carregado && !F.carregando) setTimeout(() => carregarFornecedores());
@@ -237,6 +276,8 @@ export function viewFornecedor(route) {
         </tbody></table></div>`
         : '<div class="muted small">Nenhum contrato, pedido ou despesa com este fornecedor nas obras que você pode ver.</div>'}
     </div>
+
+    ${secaoItensComprados(ficha)}
 
     <div class="card card-pad stack"><h2>Cotações e entregas</h2>
       ${(() => {

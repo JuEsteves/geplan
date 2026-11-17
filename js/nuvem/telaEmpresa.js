@@ -10,9 +10,9 @@ import { carregarDiarioNuvem } from '../diario.js';
 
 export const PAPEIS = {
   admin: 'Administrador da empresa', engenheiro: 'Engenheiro responsável', supervisor: 'Supervisor de obra',
-  financeiro: 'Financeiro', compras: 'Compras', cliente: 'Cliente (só consulta)',
+  financeiro: 'Financeiro', compras: 'Compras', cliente: 'Cliente (só consulta)', contador: 'Contador (consulta o financeiro da empresa)',
 };
-const RESTRITOS = ['supervisor', 'financeiro', 'compras', 'cliente'];   // veem só as obras em que foram incluídos
+const RESTRITOS = ['supervisor', 'financeiro', 'compras', 'cliente', 'contador'];   // veem só as obras em que foram incluídos
 const STATUS_ASS = { trialing: 'Em avaliação', active: 'Ativa', past_due: 'Pagamento pendente', unpaid: 'Inadimplente', canceled: 'Cancelada', expired: 'Expirada' };
 const fmtBRL = (n) => (Number(n) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 

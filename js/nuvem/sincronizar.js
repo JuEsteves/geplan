@@ -41,6 +41,7 @@ const AREAS_DO_PAPEL = {
   financeiro: ['financeiro', 'compras', 'historico'],
   compras: ['compras', 'historico'],
   cliente: [],
+  contador: [],
 };
 /**
  * O perfil grava esta tabela? `libs` = liberações efetivas da pessoa (migração 0007): a área de compras (contratos e

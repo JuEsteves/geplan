@@ -662,16 +662,16 @@ fieldset { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12p
    Textos e ícones usam --cor-area-tx (a cor da área misturada com a cor do texto) para continuarem legíveis. */
 :root {
   --area-visao: #5b9bd5; --area-plan: #5b7fe0; --area-orc: #9b7ee6; --area-exec: #3fb37f;
-  --area-sup: #f29a55; --area-doc: #93a3b8; --area-adm: #c29a7c;
+  --area-sup: #f29a55; --area-doc: #93a3b8; --area-adm: #c29a7c; --area-fin: #2aa8a8;
 }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) { --area-visao: #9fb6e0; --area-plan: #6f93e0; --area-orc: #a68ae6; --area-exec: #4cc28e; --area-sup: #f08a4b; --area-doc: #9aa8bb; --area-adm: #c9a58c; }
+  :root:not([data-theme="light"]) { --area-visao: #9fb6e0; --area-plan: #6f93e0; --area-orc: #a68ae6; --area-exec: #4cc28e; --area-sup: #f08a4b; --area-doc: #9aa8bb; --area-adm: #c9a58c; --area-fin: #3cc4c4; }
 }
-:root[data-theme="dark"] { --area-visao: #9fb6e0; --area-plan: #6f93e0; --area-orc: #a68ae6; --area-exec: #4cc28e; --area-sup: #f08a4b; --area-doc: #9aa8bb; --area-adm: #c9a58c; }
+:root[data-theme="dark"] { --area-visao: #9fb6e0; --area-plan: #6f93e0; --area-orc: #a68ae6; --area-exec: #4cc28e; --area-sup: #f08a4b; --area-doc: #9aa8bb; --area-adm: #c9a58c; --area-fin: #3cc4c4; }
 [data-area="visao"] { --cor-area: var(--area-visao); } [data-area="plan"] { --cor-area: var(--area-plan); }
 [data-area="orc"] { --cor-area: var(--area-orc); } [data-area="exec"] { --cor-area: var(--area-exec); }
 [data-area="sup"] { --cor-area: var(--area-sup); } [data-area="doc"] { --cor-area: var(--area-doc); }
-[data-area="adm"] { --cor-area: var(--area-adm); }
+[data-area="adm"] { --cor-area: var(--area-adm); } [data-area="fin"] { --cor-area: var(--area-fin); }
 [data-area] { --cor-area-tx: color-mix(in srgb, var(--cor-area) 68%, var(--text)); }
 
 /* largura total (monitores grandes) */
@@ -776,3 +776,11 @@ a.kpi-link:hover { border-color: var(--kpi-cor); box-shadow: 0 0 0 1px var(--kpi
 .faixa-barra > i { position: absolute; top: -3px; width: 2px; height: 12px; background: var(--series-plan); }
 .modulo-obra { padding: 14px 16px 18px; border-top: 4px solid var(--cor-area, var(--accent)); }
 .modulo-obra-topo { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; padding-bottom: 12px; margin-bottom: 14px; border-bottom: 1px solid var(--border); }
+
+/* Compras simplificadas: a coluna do material não fica estreita no celular (a tabela rola de lado) */
+.itens-sol .i-desc { min-width: 180px; }
+
+
+/* DRE: linhas de subtotal destacadas */
+.data .linha-subtotal td { background: var(--surface-2); border-top: 2px solid var(--border); }
+
